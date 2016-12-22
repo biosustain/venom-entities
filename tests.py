@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from venom import Message
+from venom.common import FieldMask
 from venom.exceptions import NotFound
 from venom.fields import String, Bool, Integer, Int32
 from venom.rpc import Service, http
@@ -123,4 +124,79 @@ class ModelServiceManagerTestCase(TestCase):
         self.assertEqual(pet.id, 1)
         self.assertEqual(pet.name, None)
 
-    # TODO remaining methods
+    def test_update_entity(self):
+        class Pet(self.sa.Model):
+            id = self.sa.Column(self.sa.Integer(), primary_key=True)
+            name = self.sa.Column(self.sa.String(), nullable=True)
+
+        self.sa.create_all()
+
+        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
+                                                             model_message=PetEntity), AttributeDict())
+
+        with self.app.app_context():
+            pet = Pet(name='snek')
+            self.sa.session.add(pet)
+            self.sa.session.commit()
+
+        with self.app.app_context():
+            pet = Pet.query.filter(Pet.id == 1).one()
+            pet = manager.update_entity(pet, PetEntity(name='noodle'), FieldMask())
+            self.assertIsInstance(pet, Pet)
+            self.assertEqual(pet.id, 1)
+            self.assertEqual(pet.name, 'snek')
+
+        with self.app.app_context():
+            pet = Pet.query.filter(Pet.id == 1).one()
+            pet = manager.update_entity(pet, PetEntity(id=5, name='noodle'), FieldMask(['id', 'name', 'foo']))
+            self.assertIsInstance(pet, Pet)
+            self.assertEqual(pet.id, 1)
+            self.assertEqual(pet.name, 'noodle')
+
+        with self.app.app_context():
+            pet = Pet.query.filter(Pet.id == 1).one()
+            pet = manager.update_entity(pet, PetEntity(), FieldMask(['name']))
+            self.assertIsInstance(pet, Pet)
+            self.assertEqual(pet.id, 1)
+            self.assertEqual(pet.name, '')
+
+    def test_delete_entity(self):
+        class Pet(self.sa.Model):
+            id = self.sa.Column(self.sa.Integer(), primary_key=True)
+            name = self.sa.Column(self.sa.String(), nullable=True)
+
+        self.sa.create_all()
+
+        with self.app.app_context():
+            pet = Pet()
+            self.sa.session.add(pet)
+            self.sa.session.commit()
+
+        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
+                                                             model_message=PetEntity), AttributeDict())
+
+        with self.app.app_context():
+            pet = Pet.query.filter(Pet.id == 1).one()
+            manager.delete_entity(pet)
+
+        with self.app.app_context():
+            self.assertEqual(Pet.query.all(), [])
+
+    def test_list_entities(self):
+        class Pet(self.sa.Model):
+            id = self.sa.Column(self.sa.Integer(), primary_key=True)
+            name = self.sa.Column(self.sa.String(), nullable=True)
+
+        self.sa.create_all()
+
+        with self.app.app_context():
+            self.sa.session.add(Pet(name='snek'))
+            self.sa.session.add(Pet(name='noodle'))
+            self.sa.session.commit()
+
+        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
+                                                             model_message=PetEntity), AttributeDict())
+
+        with self.app.app_context():
+             pets = manager.list_entities()
+             self.assertEqual([pet.name for pet in pets.entities], ['snek', 'noodle'])

@@ -1,5 +1,6 @@
+from collections import namedtuple
 from functools import partial
-from typing import Any, Tuple, Sequence, Dict, Mapping
+from typing import Any, Tuple, Sequence, Dict, Mapping, NewType, TypeVar, Generic, Union, List
 from typing import Type
 
 from flask import current_app
@@ -12,11 +13,21 @@ from venom.common import FieldMask
 from venom.converter import Converter
 from venom.exceptions import NotFound, Conflict
 from venom.fields import ConverterField
-from venom.message import get_or_default, from_object
+from venom.message import from_object, fields
 from venom.rpc.method import ServiceMethod, rpc, Method, http, HTTPVerb, http_method_decorator
 from venom.rpc.resolver import Resolver
 from venom.rpc.service import ServiceManager, Service
 from venom.util import MetaDict, cached_property
+
+E = TypeVar('E')
+
+
+class ListEntitiesResult(Generic[E]):
+    def __init__(self,
+                 entities: List[E],
+                 next_page_token: str = None):
+        self.entities = entities
+        self.next_page_token = next_page_token
 
 
 class ModelServiceManager(ServiceManager):
@@ -52,6 +63,9 @@ class ModelServiceManager(ServiceManager):
 
         self.read_only_field_names = {self.model_id_attribute}
 
+        self.default_sort_column = self.model_id_column
+        self.default_sort_reverse = False
+
     @staticmethod
     def _meta_get_model_name(meta: MetaDict, meta_changes: MetaDict) -> str:
         model_name = meta.get('model_name')
@@ -84,8 +98,27 @@ class ModelServiceManager(ServiceManager):
         except NoResultFound as e:
             raise NotFound()  # TODO custom messages
 
-    def list_entities(self, offset: int, limit: int = None) -> Tuple[Any, int]:
-        return self.model.query.all(), 0  # TODO
+    # def _encode_next_page_cursor(self, previous_value: str, offset: int = 0, reverse: bool = False) -> str:
+    #     pass
+    #
+    # def _decode_cursor(self, cursor: str) -> Tuple[str, int, bool]:
+    #     pass
+
+    def list_entities(self,
+                      page_token: str = None,
+                      page_size: int = None) -> ListEntitiesResult:
+
+        if self.default_sort_reverse:
+            order_clause = self.default_sort_column.desc()
+        else:
+            order_clause = self.default_sort_column.asc()
+
+        query = self.model.query.order_by(order_clause)
+
+        if page_size:
+            query = query.limit(page_size or 50)
+
+        return ListEntitiesResult(query.all())
 
     def create_entity(self, properties: Mapping[str, Any]) -> Any:
         entity = self.model()
@@ -107,14 +140,14 @@ class ModelServiceManager(ServiceManager):
     def update_entity(self, entity: Any, changes: Mapping[str, Any], mask: FieldMask) -> Any:
         session = self.session()
 
-        for name, value in changes.items():
-            try:
-                if name not in self.read_only_field_names and mask.match_path(name):
-                    setattr(entity, name, value)
-                session.commit()
-            except IntegrityError as e:
-                session.rollback()
-                raise Conflict()
+        try:
+            for field in fields(self.model_message):
+                if field.name not in self.read_only_field_names and mask.match_path(field.name):
+                    setattr(entity, field.name, changes.get(field.name))
+            session.commit()
+        except IntegrityError as e:
+            session.rollback()
+            raise Conflict()
 
         return entity
 
@@ -153,7 +186,7 @@ class ModelEntityResolver(Resolver):
 
     async def resolve(self, service: Service, request: Message) -> Any:
         # FIXME request[field] should always have a value (fallback to default)
-        entity_id = get_or_default(request, self.manager.entity_id_field_name)
+        entity_id = request.get(self.manager.entity_id_field_name)
         return self.manager.get_entity(entity_id)
 
 
