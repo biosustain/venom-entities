@@ -1,25 +1,29 @@
-from collections import namedtuple
-from functools import partial
-from typing import Any, Tuple, Sequence, Dict, Mapping, NewType, TypeVar, Generic, Union, List
+from typing import Any, Tuple, Sequence, MutableMapping, TypeVar, Generic, List, Set, Mapping
 from typing import Type
 
+import sqlalchemy
 from flask import current_app
 from flask_sqlalchemy import get_state
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm.exc import NoResultFound
 from venom import Message
-from venom.common import FieldMask
+from venom.common import FieldMask, String
 from venom.converter import Converter
 from venom.exceptions import NotFound, Conflict
-from venom.fields import ConverterField
+from venom.fields import ConverterField, Integer
 from venom.message import from_object, fields
-from venom.rpc.method import ServiceMethod, rpc, Method, http, HTTPVerb, http_method_decorator
+from venom.rpc.method import ServiceMethod, Method, HTTPMethodDecorator, MethodDecorator
 from venom.rpc.resolver import Resolver
 from venom.rpc.service import ServiceManager, Service
 from venom.util import MetaDict, cached_property
 
 E = TypeVar('E')
+
+
+class ListEntitiesRequest(Message):
+    page_token = String()
+    page_size = Integer()
 
 
 class ListEntitiesResult(Generic[E]):
@@ -30,83 +34,90 @@ class ListEntitiesResult(Generic[E]):
         self.next_page_token = next_page_token
 
 
-class ModelServiceManager(ServiceManager):
-    model = None  # type: type
-    model_name = None  # type: Any
-    model_message = None  # type: Type[Message]
+M = TypeVar('M', bound=Message)
 
-    # SQLAlchemy-specific:
-    model_id_column = None  # type: sqlalchemy.Column
-    model_id_attribute = None  # type: str
 
-    def __new__(cls, service: Type[Service], meta: MetaDict, meta_changes: MetaDict):
-        # fall back to ServiceManager if there is no entity and therefore no reason to use ModelServiceManager
-        if meta.get('model'):
-            obj = object.__new__(cls)
-            obj.__init__(service, meta, meta_changes)
-            return obj
-        return ServiceManager(service, meta, meta_changes)
+class EntityResource(Generic[E, M]):
+    """
 
-    def __init__(self, service: Type[Service], meta: MetaDict, meta_changes: MetaDict) -> None:
-        super().__init__(service, meta, meta_changes)
-        self.model = model = meta.model
-        self.model_name = self._meta_get_model_name(meta, meta_changes)
-        self.model_message = meta.model_message
+    .. attribute:: request_id_field_name
 
-        if meta.get('model_id_attribute'):
-            self.model_id_column = getattr(model, meta.model_id_attribute)
-            self.model_id_attribute = meta.model_id_attribute
-        else:
-            mapper = class_mapper(model)
-            self.model_id_column = model_id_column = mapper.primary_key[0]
-            self.model_id_attribute = model_id_column.name
+        The name of the id field used in messages such as GetEntityRequest. Defaults to
+        "{model_name}_{model_id_attribute}".
+
+    """
+    model: Type[E]
+    model_name: str = None
+
+    model_message: Type[M]
+
+    model_id_column: 'sqlalchemy.Column' = None
+    model_id_attribute: str = None
+
+    read_only_field_names: Set[str]
+
+    request_id_field_name: str
+
+    default_page_size: int = 50
+    maximum_page_size: int = 100
+
+    def __init__(self, model: Type[E],
+                 model_message: Type[M],
+                 *,
+                 model_name: str = None) -> None:
+        self._inspect_model(model)
+
+        self.model = model
+        self.model_message = model_message
+
+        if model_name:
+            self.model_name = model_name
+
+        self.request_id_field_name = self.model_name + '_' + self.model_id_attribute
+
+    def _inspect_model(self, model: Type[E]) -> None:
+        self.model_name = model.__tablename__.lower()
+
+        mapper = class_mapper(model)
+        self.model_id_column = model_id_column = mapper.primary_key[0]
+        self.model_id_attribute = model_id_column.name
 
         self.read_only_field_names = {self.model_id_attribute}
-
         self.default_sort_column = self.model_id_column
         self.default_sort_reverse = False
 
     @staticmethod
-    def _meta_get_model_name(meta: MetaDict, meta_changes: MetaDict) -> str:
-        model_name = meta.get('model_name')
-        if not model_name:
-            model = meta['model']
-            return model.__tablename__.lower()
-        return str(model_name)
-
-    def register_method(self, method: Method, name: str) -> Method:
-        if isinstance(method, ServiceMethod):
-            return method.register(self.service, method.name or name, converters=[self.entity_converter])
-        return method.register(self.service, method.name or name)
-
-    @cached_property
-    def entity_converter(self) -> 'ModelEntityConverter':
-        return ModelEntityConverter(self.model, self.model_message)
-
-    @cached_property
-    def entity_id_field_name(self) -> str:
-        return self.model_name + '_' + self.model_id_attribute
-
-    @staticmethod
-    def session():
+    def _session():
         # XXX reference to current_app would have to be in context if this wasn't synchronous. Use RequestContext.
         return get_state(current_app).db.session
 
-    def get_entity(self, entity_id: Any) -> Any:
+    def get_from_message(self, message: M) -> E:
+        return self.get(message[self.request_id_field_name])
+
+    def get(self, entity_id: Any) -> E:
         try:
             return self.model.query.filter(self.model_id_column == entity_id).one()
         except NoResultFound as e:
             raise NotFound()  # TODO custom messages
 
-    # def _encode_next_page_cursor(self, previous_value: str, offset: int = 0, reverse: bool = False) -> str:
-    #     pass
-    #
-    # def _decode_cursor(self, cursor: str) -> Tuple[str, int, bool]:
-    #     pass
+    # TODO return a proxy object for paginate(), create() etc.
+    # def __get__(self, instance, owner):
 
-    def list_entities(self,
-                      page_token: str = None,
-                      page_size: int = None) -> ListEntitiesResult:
+    def prepare(self, manager: 'ModelServiceManager') -> 'EntityResource':
+        """
+        An EntityResource always takes its configuration from the service where it is defined.
+
+        :param service:
+        :param meta:
+        :return:
+        """
+        self.default_page_size = manager.meta.get('default_page_size') or self.default_page_size
+        self.maximum_page_size = manager.meta.get('maximum_page_size') or self.maximum_page_size
+        return self
+
+    def paginate(self,
+                 page_token: str = '',
+                 page_size: int = 0) -> ListEntitiesResult:
 
         if self.default_sort_reverse:
             order_clause = self.default_sort_column.desc()
@@ -120,9 +131,9 @@ class ModelServiceManager(ServiceManager):
 
         return ListEntitiesResult(query.all())
 
-    def create_entity(self, properties: Mapping[str, Any]) -> Any:
+    def create(self, properties: Mapping[str, Any]) -> E:
         entity = self.model()
-        session = self.session()
+        session = self._session()
 
         try:
             for name, value in properties.items():
@@ -137,8 +148,8 @@ class ModelServiceManager(ServiceManager):
 
         return entity
 
-    def update_entity(self, entity: Any, changes: Mapping[str, Any], mask: FieldMask) -> Any:
-        session = self.session()
+    def update(self, entity: E, changes: Mapping[str, Any], mask: FieldMask) -> E:
+        session = self._session()
 
         try:
             for field in fields(self.model_message):
@@ -151,15 +162,62 @@ class ModelServiceManager(ServiceManager):
 
         return entity
 
-    def delete_entity(self, entity: Any) -> None:
-        session = self.session()
+    def delete(self, entity: E) -> None:
+        session = self._session()
         session.delete(entity)
         session.commit()
 
+    @cached_property
+    def entity_converter(self) -> 'ModelEntityConverter':
+        return ModelEntityConverter(self.model, self.model_message)
+
+    @cached_property
+    def entity_resolver(self) -> 'ModelEntityResolver':
+        return ModelEntityResolver(self)
+
+    @cached_property
+    def Inline(self) -> ConverterField:
+        return ConverterField(self.model_message, converter=self.entity_converter)
+
+    @cached_property
+    def rpc(self):
+        return MethodDecorator(EntityMethod, resource=self)
+
+    @cached_property
+    def http(self):
+        return HTTPMethodDecorator(EntityMethod, resource=self)
+
+    def __repr__(self):
+        return '<{} mapping {} to {}>'.format(self.__class__.__name__, self.model.__name__, self.model_message.__name__)
+
+
+class ModelServiceManager(ServiceManager):
+    resources: Set[EntityResource]
+
+    def __init__(self, meta: MetaDict, meta_changes: MetaDict) -> None:
+        super().__init__(meta, meta_changes)
+        self.resources = set()
+
+    def prepare_members(self, members: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+        for name, member in members.items():
+            # FIXME only look at members
+            if isinstance(member, EntityResource):
+                members[name] = resource = member.prepare(self)
+                self.resources.add(resource)
+
+        return super().prepare_members(members)
+
+    def prepare_method(self, method: Method, name: str) -> Method:
+        if isinstance(method, ServiceMethod):
+            return method.prepare(self,
+                                  method.name or name,
+                                  converters=[resource.entity_converter for resource in self.resources])
+        return method.prepare(self, method.name or name)
+
 
 class ModelEntityConverter(Converter):
-    wire = None  # type: Type[Message]
-    python = None
+    wire: Type[Message]
+    python: Any
 
     def __init__(self, model: type, model_message: Type[Message]) -> None:
         self.wire = model_message
@@ -172,22 +230,16 @@ class ModelEntityConverter(Converter):
         return from_object(self.wire, entity)
 
 
-def inline(model: type, model_message: Type[Message]) -> ConverterField:
-    return ConverterField(model_message, converter=ModelEntityConverter(model, model_message))
-
-
 class ModelEntityResolver(Resolver):
-    def __init__(self, manager: ModelServiceManager):
-        self.manager = manager
+    def __init__(self, resource: EntityResource):
+        self.resource = resource
 
     @property
     def python(self):
-        return self.manager.model
+        return self.resource.model
 
     async def resolve(self, service: Service, request: Message) -> Any:
-        # FIXME request[field] should always have a value (fallback to default)
-        entity_id = request.get(self.manager.entity_id_field_name)
-        return self.manager.get_entity(entity_id)
+        return self.resource.get_from_message(request)
 
 
 class EntityMethod(ServiceMethod):
@@ -217,31 +269,24 @@ class EntityMethod(ServiceMethod):
 
     """
 
-    def register(self,
-                 service: Type['venom.rpc.service.Service'],
-                 name: str,
-                 *args: Tuple[Resolver, ...],
-                 converters: Sequence[Converter] = ()) -> 'EntityMethod':
-        if not isinstance(service.__manager__, ModelServiceManager):
-            raise TypeError("An EntityMethod can only be used with a ModelService")
-        return super().register(service, name, ModelEntityResolver(service.__manager__), *args, converters=converters)
+    def __init__(self, *args, resource: EntityResource, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.resource = resource
 
-
-entity_rpc = partial(rpc, method_cls=EntityMethod)
-
-entity_http = partial(http, method_cls=EntityMethod)
-
-for _verb in HTTPVerb:
-    setattr(entity_http, _verb.name, http_method_decorator(_verb, method_cls=EntityMethod))
+    def prepare(self,
+                manager: 'venom.rpc.service.ServiceManager',
+                name: str,
+                *args: Tuple[Resolver, ...],
+                converters: Sequence[Converter] = ()) -> 'EntityMethod':
+        return super().prepare(manager,
+                               name,
+                               self.resource.entity_resolver,
+                               *args,
+                               converters=converters)
 
 
 class ModelService(Service):
-    __manager__ = None  # type: ModelServiceManager
-
     class Meta:
-        model = None
-        model_message = None
         manager = ModelServiceManager
-
-        # SQLAlchemy specific?
-        model_id_attribute = 'id'
+        default_page_size = None
+        maximum_page_size = 100

@@ -1,16 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
+from flask_venom import Venom
+from flask_venom.test_utils import TestCase
 from venom import Message
 from venom.common import FieldMask
 from venom.exceptions import NotFound
-from venom.fields import String, Bool, Integer, Int32
-from venom.rpc import Service, http
-
-from flask_venom.test_utils import TestCase
-from flask_venom import Venom
+from venom.fields import String, Int32
+from venom.rpc import http
 from venom.rpc.test_utils import AioTestCaseMeta
-from venom.util import AttributeDict
 
-from venom_entities import ModelService, entity_http, ModelServiceManager
+from venom_entities import ModelService, EntityResource
 
 
 class PetEntity(Message):
@@ -34,14 +32,16 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.sa.create_all()
 
         class PetStore(ModelService):
+            pets = EntityResource(Pet, PetEntity)
+
             class Meta:
-                model = Pet
-                model_message = PetEntity
+                default_page_size = 42
 
             @http.POST('', http_status=201)
             def create_pet(self, request: PetEntity) -> Pet:
-                return self.__manager__.create_entity(request)
+                return self.pets.create(request)
 
+        self.assertEqual(PetStore.pets.default_page_size, 42)
         self.assertEqual(PetStore.create_pet.response, PetEntity)
         self.venom.add(PetStore)
 
@@ -64,24 +64,23 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.sa.create_all()
 
         class PetStore(ModelService):
-            class Meta:
-                model = Pet
-                model_message = PetEntity
+            pets = EntityResource(Pet, PetEntity)
 
             class GetPetRequest(Message):
                 pet_id = Int32()
 
-            @entity_http.GET('/{pet_id}', request=GetPetRequest)
+            @pets.http.GET('/{pet_id}', request=GetPetRequest)
             def get_pet(self, pet: Pet) -> Pet:
                 return pet
 
+        self.assertIsInstance(PetStore.pets, EntityResource)
         self.assertEqual(PetStore.get_pet.request, PetStore.GetPetRequest)
         self.assertEqual(PetStore.get_pet.response, PetEntity)
 
         self.venom.add(PetStore)
 
         with self.app.app_context():
-            PetStore().__manager__.create_entity(PetEntity(name='snek'))
+            PetStore().pets.create(PetEntity(name='snek'))
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
@@ -116,10 +115,9 @@ class ModelServiceManagerTestCase(TestCase):
 
         self.sa.create_all()
 
-        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
-                                                             model_message=PetEntity), AttributeDict())
+        pets = EntityResource(Pet, PetEntity)
 
-        pet = manager.create_entity(PetEntity())
+        pet = pets.create(PetEntity())
         self.assertIsInstance(pet, Pet)
         self.assertEqual(pet.id, 1)
         self.assertEqual(pet.name, None)
@@ -131,8 +129,7 @@ class ModelServiceManagerTestCase(TestCase):
 
         self.sa.create_all()
 
-        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
-                                                             model_message=PetEntity), AttributeDict())
+        resource = EntityResource(Pet, PetEntity)
 
         with self.app.app_context():
             pet = Pet(name='snek')
@@ -141,21 +138,21 @@ class ModelServiceManagerTestCase(TestCase):
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
-            pet = manager.update_entity(pet, PetEntity(name='noodle'), FieldMask())
+            pet = resource.update(pet, PetEntity(name='noodle'), FieldMask())
             self.assertIsInstance(pet, Pet)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, 'snek')
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
-            pet = manager.update_entity(pet, PetEntity(id=5, name='noodle'), FieldMask(['id', 'name', 'foo']))
+            pet = resource.update(pet, PetEntity(id=5, name='noodle'), FieldMask(['id', 'name', 'foo']))
             self.assertIsInstance(pet, Pet)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, 'noodle')
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
-            pet = manager.update_entity(pet, PetEntity(), FieldMask(['name']))
+            pet = resource.update(pet, PetEntity(), FieldMask(['name']))
             self.assertIsInstance(pet, Pet)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, '')
@@ -172,12 +169,11 @@ class ModelServiceManagerTestCase(TestCase):
             self.sa.session.add(pet)
             self.sa.session.commit()
 
-        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
-                                                             model_message=PetEntity), AttributeDict())
+        resource = EntityResource(Pet, PetEntity)
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
-            manager.delete_entity(pet)
+            resource.delete(pet)
 
         with self.app.app_context():
             self.assertEqual(Pet.query.all(), [])
@@ -194,9 +190,8 @@ class ModelServiceManagerTestCase(TestCase):
             self.sa.session.add(Pet(name='noodle'))
             self.sa.session.commit()
 
-        manager = ModelServiceManager(Service, AttributeDict(model=Pet,
-                                                             model_message=PetEntity), AttributeDict())
+        resource = EntityResource(Pet, PetEntity)
 
         with self.app.app_context():
-             pets = manager.list_entities()
+             pets = resource.paginate()
              self.assertEqual([pet.name for pet in pets.entities], ['snek', 'noodle'])
