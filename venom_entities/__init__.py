@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Sequence, MutableMapping, TypeVar, Generic, List, Set, Mapping
+from typing import Any, Tuple, Sequence, MutableMapping, TypeVar, Generic, List, Set, Mapping, Dict, Union
 from typing import Type
 
 import sqlalchemy
@@ -26,11 +26,15 @@ class ListEntitiesRequest(Message):
     page_size = Integer()
 
 
+class ListEntitiesResponse(Message):
+    next_page_token = String()
+
+
 class ListEntitiesResult(Generic[E]):
     def __init__(self,
-                 entities: List[E],
+                 items: List[E],
                  next_page_token: str = None):
-        self.entities = entities
+        self.items = items
         self.next_page_token = next_page_token
 
 
@@ -46,6 +50,8 @@ class EntityResource(Generic[E, M]):
         "{model_name}_{model_id_attribute}".
 
     """
+    name: str = None
+
     model: Type[E]
     model_name: str = None
 
@@ -61,10 +67,13 @@ class EntityResource(Generic[E, M]):
     default_page_size: int = 50
     maximum_page_size: int = 100
 
+    _resources: Dict[str, 'EntityResource'] = {}
+
     def __init__(self, model: Type[E],
                  model_message: Type[M],
                  *,
-                 model_name: str = None) -> None:
+                 model_name: str = None,
+                 name: str = None) -> None:
         self._inspect_model(model)
 
         self.model = model
@@ -72,6 +81,10 @@ class EntityResource(Generic[E, M]):
 
         if model_name:
             self.model_name = model_name
+
+        if name:
+            self.name = name
+            self._resources[name] = self
 
         self.request_id_field_name = self.model_name + '_' + self.model_id_attribute
 
@@ -91,19 +104,29 @@ class EntityResource(Generic[E, M]):
         # XXX reference to current_app would have to be in context if this wasn't synchronous. Use RequestContext.
         return get_state(current_app).db.session
 
+    def __set_name__(self, owner, name):
+        if not self.name:
+            self.name = name
+            self._resources[name] = self
+
     def get_from_message(self, message: M) -> E:
         return self.get(message[self.request_id_field_name])
 
-    def get(self, entity_id: Any) -> E:
+    def get(self, entity_id: Any, *filters: Any) -> E:
         try:
-            return self.model.query.filter(self.model_id_column == entity_id).one()
+            query = self.model.query
+
+            if filters:
+                query = query.filter(*filters)
+
+            return query.filter(self.model_id_column == entity_id).one()
         except NoResultFound as e:
             raise NotFound()  # TODO custom messages
 
     # TODO return a proxy object for paginate(), create() etc.
     # def __get__(self, instance, owner):
 
-    def prepare(self, manager: 'ModelServiceManager') -> 'EntityResource':
+    def prepare(self, manager: 'ResourceServiceManager') -> 'EntityResource':
         """
         An EntityResource always takes its configuration from the service where it is defined.
 
@@ -117,7 +140,8 @@ class EntityResource(Generic[E, M]):
 
     def paginate(self,
                  page_token: str = '',
-                 page_size: int = 0) -> ListEntitiesResult:
+                 page_size: int = 0,
+                 *filters: Any) -> ListEntitiesResult:
 
         if self.default_sort_reverse:
             order_clause = self.default_sort_column.desc()
@@ -125,6 +149,9 @@ class EntityResource(Generic[E, M]):
             order_clause = self.default_sort_column.asc()
 
         query = self.model.query.order_by(order_clause)
+
+        if filters:
+            query = query.filter(*filters)
 
         if page_size:
             query = query.limit(page_size or 50)
@@ -168,16 +195,12 @@ class EntityResource(Generic[E, M]):
         session.commit()
 
     @cached_property
-    def entity_converter(self) -> 'ModelEntityConverter':
-        return ModelEntityConverter(self.model, self.model_message)
+    def entity_converter(self) -> 'ResourceEntityConverter':
+        return ResourceEntityConverter(self.model_message, self)
 
     @cached_property
-    def entity_resolver(self) -> 'ModelEntityResolver':
-        return ModelEntityResolver(self)
-
-    @cached_property
-    def Inline(self) -> ConverterField:
-        return ConverterField(self.model_message, converter=self.entity_converter)
+    def entity_resolver(self) -> 'ResourceEntityResolver':
+        return ResourceEntityResolver(self)
 
     @cached_property
     def rpc(self):
@@ -187,11 +210,62 @@ class EntityResource(Generic[E, M]):
     def http(self):
         return HTTPMethodDecorator(EntityMethod, resource=self)
 
+    @classmethod
+    def resolve(cls, resource_or_resource_name: Union['EntityResource', str]):
+        if isinstance(resource_or_resource_name, EntityResource):
+            return resource_or_resource_name
+        return EntityResource._resources[resource_or_resource_name]
+
     def __repr__(self):
         return '<{} mapping {} to {}>'.format(self.__class__.__name__, self.model.__name__, self.model_message.__name__)
 
 
-class ModelServiceManager(ServiceManager):
+class ResourceEntityConverter(object):
+    wire: Type[Message]
+
+    def __init__(self,
+                 model_message: Type[Message],
+                 resource_or_resource_name: Union[EntityResource, str]) -> None:
+        self.wire = model_message
+        self._reference = resource_or_resource_name
+
+    @cached_property
+    def resource(self) -> EntityResource:
+        return EntityResource.resolve(self._reference)
+
+    @cached_property
+    def python(self):
+        return self.resource.model
+
+    def convert(self, message: Message) -> Any:
+        # TODO fallback where the Python is the same as wire.
+        raise NotImplementedError()
+
+    def format(self, entity: Any) -> Message:
+        # TODO fallback where the Python is the same as wire.
+        return from_object(self.wire, entity)
+
+
+class ResourceEntityResolver(Resolver):
+    def __init__(self, resource: EntityResource):
+        self.resource = resource
+
+    @property
+    def python(self):
+        return self.resource.model
+
+    async def resolve(self, service: Service, request: Message) -> Any:
+        return self.resource.get_from_message(request)
+
+
+class EntityField(ConverterField):
+    def __init__(self,
+                 model_message: Type[Message],
+                 resource_or_resource_name: Union[EntityResource, str]) -> None:
+        super().__init__(Any, converter=ResourceEntityConverter(model_message, resource_or_resource_name))
+
+
+class ResourceServiceManager(ServiceManager):
     resources: Set[EntityResource]
 
     def __init__(self, meta: MetaDict, meta_changes: MetaDict) -> None:
@@ -215,37 +289,10 @@ class ModelServiceManager(ServiceManager):
         return method.prepare(self, method.name or name)
 
 
-class ModelEntityConverter(Converter):
-    wire: Type[Message]
-    python: Any
-
-    def __init__(self, model: type, model_message: Type[Message]) -> None:
-        self.wire = model_message
-        self.python = model
-
-    def convert(self, message: Message) -> Any:
-        raise RuntimeError()
-
-    def format(self, entity: Any) -> Message:
-        return from_object(self.wire, entity)
-
-
-class ModelEntityResolver(Resolver):
-    def __init__(self, resource: EntityResource):
-        self.resource = resource
-
-    @property
-    def python(self):
-        return self.resource.model
-
-    async def resolve(self, service: Service, request: Message) -> Any:
-        return self.resource.get_from_message(request)
-
-
 class EntityMethod(ServiceMethod):
     """
 
-    This method can only be used together with a service that has a :class:`ModelServiceManager`.
+    This method can only be used together with a service that has a :class:`ResourceServiceManager`.
 
     A function wrapped with this method must accept a positional argument that accepts an entity (of the type handled
     by this service). The entity is resolved from an id field that must be located somewhere in the message of the
@@ -258,7 +305,7 @@ class EntityMethod(ServiceMethod):
             name = String()
 
 
-        class FooModelService(ModelService):
+        class FooModelService(ResourceService):
             class Meta:
                 entity = FooEntity
                 entity_name = 'foo'
@@ -285,8 +332,8 @@ class EntityMethod(ServiceMethod):
                                converters=converters)
 
 
-class ModelService(Service):
+class ResourceService(Service):
     class Meta:
-        manager = ModelServiceManager
+        manager = ResourceServiceManager
         default_page_size = None
         maximum_page_size = 100

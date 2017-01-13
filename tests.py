@@ -8,7 +8,7 @@ from venom.fields import String, Int32
 from venom.rpc import http
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import ModelService, EntityResource
+from venom_entities import ResourceService, EntityResource
 
 
 class PetEntity(Message):
@@ -31,7 +31,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
 
         self.sa.create_all()
 
-        class PetStore(ModelService):
+        class PetStore(ResourceService):
             pets = EntityResource(Pet, PetEntity)
 
             class Meta:
@@ -63,7 +63,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
 
         self.sa.create_all()
 
-        class PetStore(ModelService):
+        class PetStore(ResourceService):
             pets = EntityResource(Pet, PetEntity)
 
             class GetPetRequest(Message):
@@ -194,4 +194,4 @@ class ModelServiceManagerTestCase(TestCase):
 
         with self.app.app_context():
              pets = resource.paginate()
-             self.assertEqual([pet.name for pet in pets.entities], ['snek', 'noodle'])
+             self.assertEqual([pet.name for pet in pets.items], ['snek', 'noodle'])
