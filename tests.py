@@ -1,14 +1,19 @@
+from typing import NamedTuple, Union, Tuple
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_venom import Venom
 from flask_venom.test_utils import TestCase
 from venom import Message
 from venom.common import FieldMask
 from venom.exceptions import NotFound
-from venom.fields import String, Int32
+from venom.fields import String, Int32, Field
+from venom.message import from_object
 from venom.rpc import http
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import ResourceService, EntityResource
+from venom_entities import EntityResource
+from venom_entities.resource import Relationship
+from venom_entities.service import ResourceService
 
 
 class PetEntity(Message):
@@ -46,15 +51,10 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.venom.add(PetStore)
 
         with self.app.app_context():
-            pet = PetStore().create_pet(PetEntity(name='snek'))
-            self.assertIsInstance(pet, Pet)
+            pet = await PetStore().create_pet(PetEntity(name='snek'))
+            self.assertIsInstance(pet, PetEntity)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, 'snek')
-
-        with self.app.app_context():
-            pet = await PetStore.create_pet.invoke(PetStore(), PetEntity(name='snek'))
-            self.assertIsInstance(pet, PetEntity)
-            self.assertEqual(pet, PetEntity(2, 'snek'))
 
     async def test_e2e_entity_method(self):
         class Pet(self.sa.Model):
@@ -81,14 +81,6 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
 
         with self.app.app_context():
             PetStore().pets.create(PetEntity(name='snek'))
-
-        with self.app.app_context():
-            pet = Pet.query.filter(Pet.id == 1).one()
-            pet = PetStore().get_pet(pet)
-
-            self.assertIsInstance(pet, Pet)
-            self.assertEqual(pet.id, 1)
-            self.assertEqual(pet.name, 'snek')
 
         with self.app.app_context():
             pet = await PetStore.get_pet.invoke(PetStore(), PetStore.GetPetRequest(pet_id=1))
@@ -195,3 +187,76 @@ class ModelServiceManagerTestCase(TestCase):
         with self.app.app_context():
              pets = resource.paginate()
              self.assertEqual([pet.name for pet in pets.items], ['snek', 'noodle'])
+
+    def _create_person_pet_scenario(self) -> Tuple[type, type]:
+        class Person(self.sa.Model):
+            id = self.sa.Column(self.sa.Integer(), primary_key=True)
+            name = self.sa.Column(self.sa.String(), nullable=True)
+
+        class Pet(self.sa.Model):
+            id = self.sa.Column(self.sa.Integer(), primary_key=True)
+            name = self.sa.Column(self.sa.String(), nullable=True)
+            owner_id = self.sa.Column(self.sa.Integer(), self.sa.ForeignKey(Person.id))
+            owner = self.sa.relationship(Person)
+
+        self.sa.create_all()
+        return Person, Pet
+
+    def test_relationship_from_field_option(self):
+        Person, Pet = self._create_person_pet_scenario()
+
+        class PersonEntity(Message):
+            id = Int32()
+            name = String()
+
+        class PetEntity(Message):
+            id = Int32()
+            name = String()
+            owner_id = Int32(relationship=('person', 'owner'))
+
+        people = EntityResource(Person, PersonEntity, name='person')
+        pets = EntityResource(Pet, PetEntity)
+
+        self.assertEqual(pets._relationships, {
+            'owner_id': Relationship('person', 'owner', 'owner_id')
+        })
+        self.assertEqual(pets._relationships['owner_id'].resource, people)
+
+    def test_relationship_to_one(self):
+        Person, Pet = self._create_person_pet_scenario()
+
+        class PersonEntity(Message):
+            id = Int32()
+            name = String()
+
+        class PetEntity(Message):
+            id = Int32()
+            name = String()
+            owner_id = Int32()
+
+        self.sa.create_all()
+
+        people = EntityResource(Person, PersonEntity)
+        pets = EntityResource(Pet, PetEntity, relationships={
+            Relationship(people, 'owner', 'owner_id')
+        })
+
+        with self.app.app_context():
+            snek = pets.create(PetEntity(name='snek'))
+
+            self.assertEqual(pets.format(snek), PetEntity(1, 'snek'))
+
+            with self.assertRaises(NotFound):
+                pets.update(snek, PetEntity(owner_id=1), FieldMask(['owner_id']))
+
+            foo = people.create(PersonEntity(name='foo'))
+            self.assertEqual(people.format(foo), PersonEntity(1, 'foo'))
+
+            snek = pets.update(snek, PetEntity(owner_id=1), FieldMask(['owner_id']))
+            self.assertEqual(pets.format(snek), PetEntity(1, 'snek', owner_id=1))
+
+            snek = pets.update(snek, PetEntity(), FieldMask(['owner_id']))
+            self.assertEqual(pets.format(snek), PetEntity(1, 'snek'))
+
+            fluff = pets.create(PetEntity(name='fluff', owner_id=1))
+            self.assertEqual(pets.format(fluff), PetEntity(2, 'fluff', owner_id=1))
