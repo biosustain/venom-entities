@@ -6,14 +6,11 @@ from flask_venom.test_utils import TestCase
 from venom import Message
 from venom.common import FieldMask
 from venom.exceptions import NotFound
-from venom.fields import String, Int32, Field
-from venom.message import from_object
+from venom.fields import String, Int32
 from venom.rpc import http
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import EntityResource
-from venom_entities.resource import Relationship
-from venom_entities.service import ResourceService
+from venom_entities import EntityResource, Relationship, ResourceService
 
 
 class PetEntity(Message):

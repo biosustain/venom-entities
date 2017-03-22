@@ -1,2 +1,3 @@
-from venom_entities.resource import EntityResource, ResourceEntityConverter, ResourceEntityIDConverter
-from venom_entities.service import ResourceServiceManager
+from .resource import EntityResource, ResourceEntityConverter, ResourceEntityIDConverter, Relationship
+from .service import ResourceServiceManager
+from .service import ResourceService
