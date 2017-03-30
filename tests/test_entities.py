@@ -8,6 +8,7 @@ from venom.common import FieldMask
 from venom.exceptions import NotFound
 from venom.fields import String, Int32
 from venom.rpc import http
+from venom.rpc.method import ServiceMethod
 from venom.rpc.test_utils import AioTestCaseMeta
 
 from venom_entities import EntityResource, Relationship, ResourceService
@@ -45,13 +46,12 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
             def create_pet(self, request: PetEntity) -> Pet:
                 return self.pets.create(request)
 
-        store = PetStore()
-        self.assertEqual(store.pets.default_page_size, 42)
-        self.assertEqual(store.create_pet.response, PetEntity)
+        self.assertEqual(PetStore.pets.default_page_size, 42)
+        self.assertEqual(PetStore.create_pet.response, PetEntity)
         self.venom.add(PetStore)
 
         with self.app.app_context():
-            pet = await store.create_pet(PetEntity(name='snek'))
+            pet = await PetStore().create_pet(PetEntity(name='snek'))
             self.assertIsInstance(pet, PetEntity)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, 'snek')
@@ -74,26 +74,26 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
                 return pet
 
         self.assertIn(PetStore.pets.entity_converter, PetStore.__meta__.converters)
-        self.assertIsInstance(PetStore.get_pet, EntityMethodDescriptor)
+        self.assertIsInstance(PetStore.__method_descriptors__['get_pet'], EntityMethodDescriptor)
+        self.assertIsInstance(PetStore.get_pet, ServiceMethod)
 
-        store = PetStore()
-        self.assertIsInstance(store.pets, EntityResource)
-        self.assertEqual(store.get_pet.request, PetStore.GetPetRequest)
-        self.assertEqual(store.get_pet.response, PetEntity)
+        self.assertIsInstance(PetStore.pets, EntityResource)
+        self.assertEqual(PetStore.get_pet.request, PetStore.GetPetRequest)
+        self.assertEqual(PetStore.get_pet.response, PetEntity)
 
         self.venom.add(PetStore)
 
         with self.app.app_context():
-            store.pets.create(PetEntity(name='snek'))
+            PetStore().pets.create(PetEntity(name='snek'))
 
         with self.app.app_context():
-            pet = await store.get_pet.invoke(PetStore.GetPetRequest(pet_id=1))
+            pet = await PetStore().get_pet(PetStore.GetPetRequest(pet_id=1))
             self.assertIsInstance(pet, PetEntity)
             self.assertEqual(pet, PetEntity(1, 'snek'))
 
         with self.app.app_context():
             with self.assertRaises(NotFound):
-                await store.get_pet.invoke(PetStore.GetPetRequest(pet_id=2))
+                await PetStore().get_pet(PetStore.GetPetRequest(pet_id=2))
 
 
 class ModelServiceManagerTestCase(TestCase):
