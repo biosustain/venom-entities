@@ -1,2 +1,2 @@
 from .resource import EntityResource, ResourceEntityConverter, ResourceEntityIDConverter, Relationship
-from .service import ResourceServiceManager, ResourceService
+from .service import ResourceService

@@ -1,11 +1,12 @@
-from typing import Tuple, Sequence
+from typing import Tuple, Sequence, Type
 
 from venom.converter import Converter
-from venom.rpc.method import ServiceMethod
+from venom.rpc import Service
+from venom.rpc.method import ServiceMethod, ServiceMethodDescriptor
 from venom.rpc.resolver import Resolver
 
 
-class EntityMethod(ServiceMethod):
+class EntityMethodDescriptor(ServiceMethodDescriptor):
     """
 
     This method can only be used together with a service that has a :class:`ResourceServiceManager`.
@@ -26,7 +27,7 @@ class EntityMethod(ServiceMethod):
                 entity = FooEntity
                 entity_name = 'foo'
 
-            @rpc(method_cls=EntityMethod)
+            @rpc(method_cls=EntityMethodDescriptor)
             async def update_entity(self, entity: FooEntity, request: UpdateFooEntityRequest) -> FooEntity:
                 ...
 
@@ -37,11 +38,11 @@ class EntityMethod(ServiceMethod):
         self.resource = resource
 
     def prepare(self,
-                manager: 'venom.rpc.service.ServiceManager',
+                service: Type[Service],
                 name: str,
                 *args: Tuple[Resolver, ...],
-                converters: Sequence[Converter] = ()) -> 'EntityMethod':
-        return super().prepare(manager,
+                converters: Sequence[Converter] = ()) -> 'ServiceMethod':
+        return super().prepare(service,
                                name,
                                self.resource.entity_resolver,
                                *args,

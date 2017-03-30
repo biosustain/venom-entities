@@ -14,7 +14,7 @@ from venom.rpc.resolver import Resolver
 from venom.util import cached_property
 
 from .messages import ListEntitiesResult
-from .methods import EntityMethod
+from .methods import EntityMethodDescriptor
 
 E = TypeVar('E')
 
@@ -114,6 +114,15 @@ class EntityResource(Generic[E, E_id, M]):
             self.name = name
             self.__resources[name] = self
 
+        from .service import ResourceService
+        if issubclass(owner, Service):
+            self.default_page_size = owner.__meta__.get('default_page_size') or self.default_page_size
+            self.maximum_page_size = owner.__meta__.get('maximum_page_size') or self.maximum_page_size
+            owner.__meta__.converters += self.entity_converter,
+
+        if issubclass(owner, ResourceService):
+            owner.__resources__.add(self)
+
     def get_from_message(self, message: M) -> E:
         return self.get(message[self.request_id_field_name])
 
@@ -137,14 +146,6 @@ class EntityResource(Generic[E, E_id, M]):
                 return entity[self.model_id_attribute]
             except (IndexError, TypeError, KeyError):
                 return getattr(entity, self.model_id_attribute)
-
-    def prepare(self, manager: 'ResourceServiceManager') -> 'EntityResource':
-        """
-        An EntityResource always takes its configuration from the service where it is defined.
-        """
-        self.default_page_size = manager.meta.get('default_page_size') or self.default_page_size
-        self.maximum_page_size = manager.meta.get('maximum_page_size') or self.maximum_page_size
-        return self
 
     def paginate(self,
                  page_token: str = '',
@@ -245,11 +246,11 @@ class EntityResource(Generic[E, E_id, M]):
 
     @cached_property
     def rpc(self):
-        return MethodDecorator(EntityMethod, resource=self)
+        return MethodDecorator(EntityMethodDescriptor, resource=self)
 
     @cached_property
     def http(self):
-        return HTTPMethodDecorator(EntityMethod, resource=self)
+        return HTTPMethodDecorator(EntityMethodDescriptor, resource=self)
 
     @classmethod
     def resolve(cls, resource_or_resource_name: Union['EntityResource', str]):
