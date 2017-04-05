@@ -11,7 +11,7 @@ from venom.rpc import http
 from venom.rpc.method import ServiceMethod
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import EntityResource, Relationship, ResourceService
+from venom_entities import SQLAlchemyResource, Relationship, ResourceService
 from venom_entities.methods import EntityMethodDescriptor
 
 
@@ -20,8 +20,7 @@ class PetEntity(Message):
     name = String()
 
 
-class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
-
+class ResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
     def setUp(self):
         super().setUp()
         self.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -37,7 +36,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.sa.create_all()
 
         class PetStore(ResourceService):
-            pets = EntityResource(Pet, PetEntity)
+            pets = SQLAlchemyResource(Pet, PetEntity)
 
             class Meta:
                 default_page_size = 42
@@ -64,7 +63,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.sa.create_all()
 
         class PetStore(ResourceService):
-            pets = EntityResource(Pet, PetEntity)
+            pets = SQLAlchemyResource(Pet, PetEntity)
 
             class GetPetRequest(Message):
                 pet_id = Int32()
@@ -77,7 +76,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.assertIsInstance(PetStore.__method_descriptors__['get_pet'], EntityMethodDescriptor)
         self.assertIsInstance(PetStore.get_pet, ServiceMethod)
 
-        self.assertIsInstance(PetStore.pets, EntityResource)
+        self.assertIsInstance(PetStore.pets, SQLAlchemyResource)
         self.assertEqual(PetStore.get_pet.request, PetStore.GetPetRequest)
         self.assertEqual(PetStore.get_pet.response, PetEntity)
 
@@ -96,8 +95,7 @@ class ModelServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
                 await PetStore().get_pet(PetStore.GetPetRequest(pet_id=2))
 
 
-class ModelServiceManagerTestCase(TestCase):
-
+class ResourceServiceManagerTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -111,7 +109,7 @@ class ModelServiceManagerTestCase(TestCase):
 
         self.sa.create_all()
 
-        pets = EntityResource(Pet, PetEntity)
+        pets = SQLAlchemyResource(Pet, PetEntity)
 
         pet = pets.create(PetEntity())
         self.assertIsInstance(pet, Pet)
@@ -125,7 +123,7 @@ class ModelServiceManagerTestCase(TestCase):
 
         self.sa.create_all()
 
-        resource = EntityResource(Pet, PetEntity)
+        resource = SQLAlchemyResource(Pet, PetEntity)
 
         with self.app.app_context():
             pet = Pet(name='snek')
@@ -165,7 +163,7 @@ class ModelServiceManagerTestCase(TestCase):
             self.sa.session.add(pet)
             self.sa.session.commit()
 
-        resource = EntityResource(Pet, PetEntity)
+        resource = SQLAlchemyResource(Pet, PetEntity)
 
         with self.app.app_context():
             pet = Pet.query.filter(Pet.id == 1).one()
@@ -186,11 +184,11 @@ class ModelServiceManagerTestCase(TestCase):
             self.sa.session.add(Pet(name='noodle'))
             self.sa.session.commit()
 
-        resource = EntityResource(Pet, PetEntity)
+        resource = SQLAlchemyResource(Pet, PetEntity)
 
         with self.app.app_context():
-             pets = resource.paginate()
-             self.assertEqual([pet.name for pet in pets.items], ['snek', 'noodle'])
+            pets = resource.paginate()
+            self.assertEqual([pet.name for pet in pets.items], ['snek', 'noodle'])
 
     def _create_person_pet_scenario(self) -> Tuple[type, type]:
         class Person(self.sa.Model):
@@ -218,8 +216,8 @@ class ModelServiceManagerTestCase(TestCase):
             name = String()
             owner_id = Int32(relationship=('person', 'owner'))
 
-        people = EntityResource(Person, PersonEntity, name='person')
-        pets = EntityResource(Pet, PetEntity)
+        people = SQLAlchemyResource(Person, PersonEntity, name='person')
+        pets = SQLAlchemyResource(Pet, PetEntity)
 
         self.assertEqual(pets._relationships, {
             'owner_id': Relationship('person', 'owner', 'owner_id')
@@ -240,8 +238,8 @@ class ModelServiceManagerTestCase(TestCase):
 
         self.sa.create_all()
 
-        people = EntityResource(Person, PersonEntity)
-        pets = EntityResource(Pet, PetEntity, relationships={
+        people = SQLAlchemyResource(Person, PersonEntity)
+        pets = SQLAlchemyResource(Pet, PetEntity, relationships={
             Relationship(people, 'owner', 'owner_id')
         })
 

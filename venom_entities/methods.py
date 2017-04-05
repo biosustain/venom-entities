@@ -33,7 +33,7 @@ class EntityMethodDescriptor(ServiceMethodDescriptor):
 
     """
 
-    def __init__(self, *args, resource: 'venom_entity.resource.EntityResource', **kwargs):
+    def __init__(self, *args, resource: 'venom_entity.resource.SQLAlchemyResource', **kwargs):
         super().__init__(*args, **kwargs)
         self.resource = resource
 

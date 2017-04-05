@@ -1,13 +1,6 @@
-from typing import Generic, Type, Set, Dict, Any, Mapping, Union, TypeVar, NamedTuple, Iterable
-
-from flask import current_app
-from flask_sqlalchemy import get_state
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import class_mapper
-from sqlalchemy.orm.exc import NoResultFound
+from typing import Generic, Type, Dict, Any, Mapping, Union, TypeVar, NamedTuple
 from venom.common import FieldMask, Message, Converter
-from venom.exceptions import NotFound, Conflict
-from venom.message import fields, from_object
+from venom.message import from_object
 from venom.rpc import Service
 from venom.rpc.method import MethodDecorator, HTTPMethodDecorator
 from venom.rpc.resolver import Resolver
@@ -16,225 +9,68 @@ from venom.util import cached_property
 from .messages import ListEntitiesResult
 from .methods import EntityMethodDescriptor
 
-E = TypeVar('E')
-
-E_id = TypeVar('E_id')
-
-M = TypeVar('M', bound=Message)
+_Mo = TypeVar('Mo')
+_Mo_id = TypeVar('Mo_id')
+_M = TypeVar('M', bound=Message)
 
 
 class _Relationship(NamedTuple):
-    reference: Union['EntityResource', str]
+    reference: Union['Resource', str]
     name: str
     field_name: str
 
 
 class Relationship(_Relationship):
     @property
-    def resource(self) -> 'EntityResource':
-        return EntityResource.resolve(self.reference)
+    def resource(self) -> 'Resource':
+        return Resource.resolve(self.reference)
 
 
-class EntityResource(Generic[E, E_id, M]):
-    """
+class Resource(Generic[_Mo, _Mo_id, _M]):
+    _resources: Dict[str, 'Resource'] = {}
 
-    .. attribute:: request_id_field_name
-
-        The name of the id field used in messages such as GetEntityRequest. Defaults to
-        "{model_name}_{model_id_attribute}".
-
-    """
     name: str = None
 
-    model: Type[E]
+    model: Type[_Mo]
     model_name: str = None
 
-    model_message: Type[M]
+    model_message: Type[_M]
+    model_id_type: Type[_Mo_id] = int
 
-    model_id_column: 'sqlalchemy.Column' = None
-    model_id_attribute: str = None
-    model_id_type: E_id = int  # TODO
-
-    read_only_field_names: Set[str]
-
-    request_id_field_name: str
-
-    default_page_size: int = 50
-    maximum_page_size: int = 100
-
-    __resources: Dict[str, 'EntityResource'] = {}
-
-    def __init__(self, model: Type[E],
-                 model_message: Type[M],
+    def __init__(self,
+                 model: Type[_Mo],
+                 model_message: Type[_M],
                  *,
-                 model_name: str = None,
                  name: str = None,
-                 relationships: Iterable[Relationship] = ()) -> None:
-        self._inspect_model(model)
-
+                 model_name: str = None) -> None:
         self.model = model
         self.model_message = model_message
 
-        self._relationships = {
-            r.field_name: r for r in relationships
-        }
-
-        for field in fields(model_message):
-            if field.options.get('relationship'):
-                reference, name = field.options.relationship
-                self._relationships[field.name] = Relationship(reference, name, field.name)
-
-        if model_name:
-            self.model_name = model_name
-
         if name:
             self.name = name
-            self.__resources[name] = self
+            self._resources[name] = self
 
-        self.request_id_field_name = self.model_name + '_' + self.model_id_attribute
-
-    def _inspect_model(self, model: Type[E]) -> None:
-        self.model_name = model.__tablename__.lower()
-
-        mapper = class_mapper(model)
-        self.model_id_column = model_id_column = mapper.primary_key[0]
-        self.model_id_attribute = model_id_column.name
-
-        self.read_only_field_names = {self.model_id_attribute}
-        self.default_sort_column = self.model_id_column
-        self.default_sort_reverse = False
-
-    @staticmethod
-    def _session():
-        # XXX reference to current_app would have to be in context if this wasn't synchronous. Use RequestContext.
-        return get_state(current_app).db.session
+        self.model_name = model_name
 
     def __set_name__(self, owner, name):
         if not self.name:
             self.name = name
-            self.__resources[name] = self
+            self._resources[name] = self
 
-        from .service import ResourceService
-        if issubclass(owner, Service):
-            self.default_page_size = owner.__meta__.get('default_page_size') or self.default_page_size
-            self.maximum_page_size = owner.__meta__.get('maximum_page_size') or self.maximum_page_size
-            owner.__meta__.converters += self.entity_converter,
+    def get(self, id_: _Mo_id, *filters: Any) -> _Mo:
+        raise NotImplementedError
 
-        if issubclass(owner, ResourceService):
-            owner.__resources__.add(self)
-
-    def get_from_message(self, message: M) -> E:
-        return self.get(message[self.request_id_field_name])
-
-    def get(self, entity_id: Any, *filters: Any) -> E:
-        try:
-            query = self.model.query
-
-            if filters:
-                query = query.filter(*filters)
-
-            return query.filter(self.model_id_column == entity_id).one()
-        except NoResultFound as e:
-            raise NotFound()  # TODO custom messages
-
-    # TODO return a proxy object for paginate(), create() etc.
-    # def __get__(self, instance, owner):
-
-    def get_entity_id(self, entity: E) -> Any:
-        if hasattr(entity, '__getitem__'):
-            try:
-                return entity[self.model_id_attribute]
-            except (IndexError, TypeError, KeyError):
-                return getattr(entity, self.model_id_attribute)
+    def update(self, entity: _Mo, changes: Mapping[str, Any], mask: FieldMask) -> _Mo:
+        raise NotImplementedError
 
     def paginate(self,
                  page_token: str = '',
                  page_size: int = 0,
                  *filters: Any) -> ListEntitiesResult:
+        raise NotImplementedError
 
-        if self.default_sort_reverse:
-            order_clause = self.default_sort_column.desc()
-        else:
-            order_clause = self.default_sort_column.asc()
-
-        query = self.model.query.order_by(order_clause)
-
-        if filters:
-            query = query.filter(*filters)
-
-        if page_size:
-            query = query.limit(page_size or 50)
-
-        return ListEntitiesResult(query.all())
-
-    def create(self, properties: Mapping[str, Any]) -> E:
-        entity = self.model()
-        session = self._session()
-
-        try:
-            for name, value in properties.items():
-                if name not in self.read_only_field_names:
-                    if name in self._relationships:
-                        relationship = self._relationships[name]
-                        resource = self.resolve(relationship.resource)
-                        setattr(entity, relationship.name, resource.get(value))
-                    else:
-                        setattr(entity, name, value)
-
-            session.add(entity)
-            session.commit()
-        except IntegrityError as e:
-            session.rollback()
-            raise Conflict()
-
-        return entity
-
-    def update(self, entity: E, changes: Mapping[str, Any], mask: FieldMask) -> E:
-        session = self._session()
-
-        try:
-            for field in fields(self.model_message):
-                if not mask.match_path(field.name):
-                    continue
-
-                if field.name not in self.read_only_field_names:
-                    if field.name in self._relationships:
-                        # TODO ToMany relationships
-                        if changes.get(field.name):
-                            relationship = self._relationships[field.name]
-                            resource = self.resolve(relationship.resource)
-                            setattr(entity, relationship.name, resource.get(changes.get(field.name)))
-                        else:
-                            setattr(entity, field.name, None)
-                    else:
-                        setattr(entity, field.name, changes.get(field.name))
-            session.commit()
-        except IntegrityError as e:
-            session.rollback()
-            raise Conflict()
-
-        return entity
-
-    def delete(self, entity: E) -> None:
-        session = self._session()
-        session.delete(entity)
-        session.commit()
-
-    def format(self, entity: E) -> M:
-        message = self.model_message()
-        for field in fields(self.model_message):
-            if field.name in self._relationships:
-                relationship = self._relationships[field.name]
-                resource = self.resolve(relationship.resource)
-                relationship_entity = getattr(entity, relationship.name)
-                if relationship_entity is not None:
-                    message[field.name] = resource.format_id(relationship_entity)
-            else:
-                message[field.name] = getattr(entity, field.name)
-        return message
-
-    def format_id(self, entity: E) -> E_id:
-        return getattr(entity, self.model_id_attribute)
+    def delete(self, entity: _Mo) -> None:
+        raise NotImplementedError
 
     @cached_property
     def entity_converter(self) -> 'ResourceEntityConverter':
@@ -245,35 +81,37 @@ class EntityResource(Generic[E, E_id, M]):
         return ResourceEntityResolver(self)
 
     @cached_property
-    def rpc(self):
+    def rpc(self) -> MethodDecorator:
         return MethodDecorator(EntityMethodDescriptor, resource=self)
 
     @cached_property
-    def http(self):
+    def http(self) -> HTTPMethodDecorator:
         return HTTPMethodDecorator(EntityMethodDescriptor, resource=self)
 
     @classmethod
-    def resolve(cls, resource_or_resource_name: Union['EntityResource', str]):
-        if isinstance(resource_or_resource_name, EntityResource):
+    def resolve(cls, resource_or_resource_name: Union['Resource', str]):
+        if isinstance(resource_or_resource_name, Resource):
             return resource_or_resource_name
         try:
-            return EntityResource.__resources[resource_or_resource_name]
+            return Resource._resources[resource_or_resource_name]
         except KeyError:
             raise RuntimeError(f'Unknown resource: "{resource_or_resource_name}"')
 
     def __repr__(self):
-        return '<{} mapping {} to {}>'.format(self.__class__.__name__, self.model.__name__, self.model_message.__name__)
+        return '<{} mapping {} to {}>'.format(self.__class__.__name__,
+                                              self.model.__name__,
+                                              self.model_message.__name__)
 
 
 class ResourceConverterBase(object):
-    _reference: Union[EntityResource, str]
+    _reference: Union[Resource, str]
 
-    def __init__(self, resource_or_resource_name: Union[EntityResource, str]) -> None:
+    def __init__(self, resource_or_resource_name: Union[Resource, str]) -> None:
         self._reference = resource_or_resource_name
 
     @cached_property
-    def resource(self) -> EntityResource:
-        return EntityResource.resolve(self._reference)
+    def resource(self) -> Resource:
+        return Resource.resolve(self._reference)
 
 
 class ResourceEntityConverter(ResourceConverterBase, Converter):
@@ -281,7 +119,7 @@ class ResourceEntityConverter(ResourceConverterBase, Converter):
 
     def __init__(self,
                  model_message: Type[Message],
-                 resource_or_resource_name: Union[EntityResource, str]) -> None:
+                 resource_or_resource_name: Union[Resource, str]) -> None:
         super().__init__(resource_or_resource_name)
         self.wire = model_message
 
@@ -299,7 +137,7 @@ class ResourceEntityConverter(ResourceConverterBase, Converter):
 
 
 class ResourceEntityResolver(Resolver):
-    def __init__(self, resource: EntityResource):
+    def __init__(self, resource: Resource):
         self.resource = resource
 
     @property
@@ -313,7 +151,7 @@ class ResourceEntityResolver(Resolver):
 class ResourceEntityIDConverter(ResourceConverterBase, Converter):
     def __init__(self,
                  model_id_type: Union[int, str],
-                 resource_or_resource_name: Union[EntityResource, str]) -> None:
+                 resource_or_resource_name: Union[Resource, str]) -> None:
         super().__init__(resource_or_resource_name)
         self.wire = model_id_type
 
