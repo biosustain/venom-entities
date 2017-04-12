@@ -3,7 +3,7 @@ from typing import Type, Union, Any
 from venom import Message
 from venom.fields import ConverterField, String
 
-from venom_entities import SQLAlchemyResource, ResourceEntityConverter
+from venom_resource import SQLAlchemyResource, ResourceEntityConverter
 
 
 class EntityField(ConverterField):

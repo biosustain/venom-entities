@@ -11,8 +11,8 @@ from venom.rpc import http
 from venom.rpc.method import ServiceMethod
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import SQLAlchemyResource, Relationship, ResourceService
-from venom_entities.methods import EntityMethodDescriptor
+from venom_resource import SQLAlchemyResource, Relationship, ResourceService
+from venom_resource.methods import EntityMethodDescriptor
 
 
 class PetEntity(Message):

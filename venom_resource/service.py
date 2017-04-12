@@ -10,9 +10,9 @@ from venom.rpc import Service, http
 from venom.rpc.inspection import dynamic
 from venom.util import upper_camelcase
 
-from venom_entities.messages import ListEntitiesRequest, ListEntitiesResponse
+from venom_resource.messages import ListEntitiesRequest, ListEntitiesResponse
 from .resource import Resource
-from venom_entities import SQLAlchemyResource
+from venom_resource import SQLAlchemyResource
 
 
 class ResourceService(Service):

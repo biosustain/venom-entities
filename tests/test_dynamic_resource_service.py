@@ -10,8 +10,8 @@ from venom.fields import Integer, String, Field
 from venom.message import fields, Empty
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_entities import SQLAlchemyResource
-from venom_entities.service import DynamicResourceService
+from venom_resource import SQLAlchemyResource
+from venom_resource.service import DynamicResourceService
 
 
 class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):

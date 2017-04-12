@@ -9,8 +9,8 @@ from venom.exceptions import NotFound, Conflict
 from venom.message import fields
 from venom.rpc import Service
 
-from venom_entities import Relationship
-from venom_entities.resource import Resource, _Mo, _Mo_id, _M
+from venom_resource import Relationship
+from venom_resource.resource import Resource, _Mo, _Mo_id, _M
 
 
 class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
