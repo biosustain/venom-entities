@@ -1,12 +1,13 @@
-from typing import Generic, Type, Dict, Any, Mapping, Union, TypeVar, NamedTuple
-from venom.common import FieldMask, Message, Converter
-from venom.message import from_object
+from typing import Generic, Type, Dict, Any, Mapping, Union, TypeVar, NamedTuple, List, Tuple
+from venom.common import FieldMask, Message, Converter, Field, Repeat
+from venom.common.types import JSONObject, JSONValue
+from venom.message import from_object, message_factory
 from venom.rpc import Service
 from venom.rpc.method import MethodDecorator, HTTPMethodDecorator
 from venom.rpc.resolver import Resolver
-from venom.util import cached_property
+from venom.util import cached_property, upper_camelcase
 
-from .messages import ListEntitiesResult
+from .messages import ListEntitiesRequest, ListEntitiesResponse
 from .methods import EntityMethodDescriptor
 
 _Mo = TypeVar('Mo')
@@ -37,6 +38,9 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
     model_message: Type[_M]
     model_id_type: Type[_Mo_id] = int
 
+    order_schema: Any = None
+    filter_schema: Any = None
+
     def __init__(self,
                  model: Type[_Mo],
                  model_message: Type[_M],
@@ -57,6 +61,9 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
             self.name = name
             self._resources[name] = self
 
+    def create(self, properties: Mapping[str, Any]) -> _Mo:
+        raise NotImplementedError
+
     def get(self, id_: _Mo_id, *filters: Any) -> _Mo:
         raise NotImplementedError
 
@@ -66,11 +73,24 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
     def paginate(self,
                  page_token: str = '',
                  page_size: int = 0,
-                 *filters: Any) -> ListEntitiesResult:
+                 *filters: Any) -> Tuple[List[_M], str]:
         raise NotImplementedError
 
     def delete(self, entity: _Mo) -> None:
         raise NotImplementedError
+
+    @cached_property
+    def list_request_message(self) -> Type[ListEntitiesRequest]:
+        return message_factory(f'List{upper_camelcase(self.name)}Request', {
+            'filters': Field(JSONObject, schema=self.filter_schema),
+            'order': Repeat(Field(JSONValue, schema=self.order_schema))
+        }, super_message=ListEntitiesRequest)
+
+    @cached_property
+    def list_response_message(self) -> Type[ListEntitiesResponse]:
+        return message_factory(f'List{upper_camelcase(self.name)}Response', {
+            'items_': Repeat(self.model_message, name='items')
+        }, super_message=ListEntitiesResponse)
 
     @cached_property
     def entity_converter(self) -> 'ResourceEntityConverter':

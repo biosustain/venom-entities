@@ -187,8 +187,8 @@ class ResourceServiceManagerTestCase(TestCase):
         resource = SQLAlchemyResource(Pet, PetEntity)
 
         with self.app.app_context():
-            pets = resource.paginate()
-            self.assertEqual([pet.name for pet in pets.items], ['snek', 'noodle'])
+            items, next_page_token = resource.paginate()
+            self.assertEqual([pet.name for pet in items], ['snek', 'noodle'])
 
     def _create_person_pet_scenario(self) -> Tuple[type, type]:
         class Person(self.sa.Model):

@@ -3,14 +3,13 @@ from flask_sqlalchemy import get_state
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm.exc import NoResultFound
-from typing import Type, Set, Iterable, Any, Mapping
+from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
 from venom.common import FieldMask
 from venom.exceptions import NotFound, Conflict
 from venom.message import fields
 from venom.rpc import Service
 
 from venom_entities import Relationship
-from venom_entities.messages import ListEntitiesResult
 from venom_entities.resource import Resource, _Mo, _Mo_id, _M
 
 
@@ -117,7 +116,7 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
     def paginate(self,
                  page_token: str = '',
                  page_size: int = 0,
-                 *filters: Any) -> ListEntitiesResult:
+                 *filters: Any) -> Tuple[List[_M], str]:
 
         if self.default_sort_reverse:
             order_clause = self.default_sort_column.desc()
@@ -132,7 +131,7 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
         if page_size:
             query = query.limit(page_size or 50)
 
-        return ListEntitiesResult(query.all())
+        return query.all(), ''
 
     def create(self, properties: Mapping[str, Any]) -> _Mo:
         entity = self.model()
