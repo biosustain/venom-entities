@@ -6,7 +6,7 @@ from sqlalchemy.orm.exc import NoResultFound
 from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
 from venom.common import FieldMask
 from venom.exceptions import NotFound, Conflict
-from venom.message import fields
+from venom.message import fields, items
 from venom.rpc import Service
 
 from venom_resource import Relationship
@@ -133,12 +133,12 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
 
         return query.all(), ''
 
-    def create(self, properties: Mapping[str, Any]) -> _Mo:
+    def create(self, properties: _M) -> _Mo:
         entity = self.model()
         session = self._session()
 
         try:
-            for name, value in properties.items():
+            for name, value in items(properties):
                 if name not in self.read_only_field_names:
                     if name in self._relationships:
                         relationship = self._relationships[name]
