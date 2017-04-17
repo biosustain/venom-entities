@@ -34,6 +34,7 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
 
     model: Type[_Mo]
     model_name: str = None
+    model_plural_name: str = None
 
     model_message: Type[_M]
     model_id_type: Type[_Mo_id] = int
@@ -59,6 +60,7 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
             self._resources[name] = self
 
         self.model_name = model_name
+        self.model_plural_name = f'{model_name}s'
         self.request_id_field_name = f'{self.model_name}_id'
         self.request_path = f'./{{{self.request_id_field_name}}}'
 

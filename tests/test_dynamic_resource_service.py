@@ -59,6 +59,7 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
         self.assertEqual(PetService.create.http_path, '/pet')
+        self.assertEqual(PetService.create.name, 'create_pet')
 
         self.assertEqual(PetService.create.request, PetMessage)
         self.assertEqual(PetService.create.response, PetMessage)
@@ -73,6 +74,8 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
         self.assertEqual(PetService.update.http_path, '/pet/{pet_id}')
+        self.assertEqual(PetService.update.name, 'update_pet')
+
         self.assertEqual(PetService.update.response, PetMessage)
         self.assertEqual(fields(PetService.update.request), (
             Field(FieldMask, name='update_mask'),
@@ -94,6 +97,8 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
         self.assertEqual(PetService.delete.http_path, '/pet/{pet_id}')
+        self.assertEqual(PetService.delete.name, 'delete_pet')
+
         self.assertEqual(fields(PetService.delete.request), (Integer(name='id'),))
         self.assertEqual(PetService.delete.response, Empty)
 
@@ -109,6 +114,8 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
         self.assertEqual(PetService.list.http_path, '/pet')
+        self.assertEqual(PetService.list.name, 'list_pets')
+
         self.assertEqual(fields(PetService.list.request), (
             Field(JSONObject, name='filters', schema=PetService.__resource__.filter_schema),
             Repeat(Field(JSONValue, schema=PetService.__resource__.order_schema), name='order'),

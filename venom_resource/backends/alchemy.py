@@ -63,7 +63,8 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
 
     def _inspect_model(self, model: Type[_Mo]) -> None:
         if not self.model_name:
-            self.model_name = model.__tablename__.lower()
+            self.model_name = model_name = model.__tablename__.lower()
+            self.model_plural_name = f'{model_name}s'
 
         mapper = class_mapper(model)
         self.model_id_column = model_id_column = mapper.primary_key[0]
