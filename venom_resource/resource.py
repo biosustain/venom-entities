@@ -7,7 +7,7 @@ from venom.rpc.method import MethodDecorator, HTTPMethodDecorator
 from venom.rpc.resolver import Resolver
 from venom.util import cached_property, upper_camelcase
 
-from .messages import ListEntitiesRequest, ListEntitiesResponse
+from .messages import ListEntitiesRequest, ListEntitiesResponse, UpdateEntityRequest
 from .methods import EntityMethodDescriptor
 
 _Mo = TypeVar('Mo')
@@ -37,9 +37,13 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
 
     model_message: Type[_M]
     model_id_type: Type[_Mo_id] = int
+    model_id_attribute: str
 
     order_schema: Any = None
     filter_schema: Any = None
+
+    request_id_field_name: str
+    request_path: str
 
     def __init__(self,
                  model: Type[_Mo],
@@ -55,6 +59,8 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
             self._resources[name] = self
 
         self.model_name = model_name
+        self.request_id_field_name = f'{self.model_name}_id'
+        self.request_path = f'./{{{self.request_id_field_name}}}'
 
     def __set_name__(self, owner, name):
         if not self.name:
@@ -89,8 +95,21 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
     @cached_property
     def list_response_message(self) -> Type[ListEntitiesResponse]:
         return message_factory(f'List{upper_camelcase(self.name)}Response', {
-            'items_': Repeat(self.model_message, name='items')
+            'items': Repeat(self.model_message)
         }, super_message=ListEntitiesResponse)
+
+    @cached_property
+    def update_request_message(self) -> Type[UpdateEntityRequest]:
+        return message_factory(f'Update{upper_camelcase(self.name)}Request', {
+            self.request_id_field_name: Field(self.model_id_type),
+            self.model_name: Field(self.model_message)
+        }, super_message=UpdateEntityRequest)
+
+    @cached_property
+    def get_request_message(self) -> Type[Message]:
+        return message_factory(f'Get{upper_camelcase(self.name)}Request', {
+            self.request_id_field_name: Field(self.model_id_type),
+        })
 
     @cached_property
     def entity_converter(self) -> 'ResourceEntityConverter':

@@ -1,7 +1,8 @@
 from typing import Generic, List, TypeVar
 
 from venom import Message
-from venom.common.types import JSONObject, JSONArray, JSONValue
+from venom.common import FieldMask
+from venom.common.types import JSONObject, JSONValue
 from venom.fields import String, Integer, Field, Repeat
 
 E = TypeVar('E')
@@ -17,4 +18,8 @@ class ListEntitiesRequest(Message):
 
 class ListEntitiesResponse(Message):
     next_page_token = String()
-    items_ = Repeat(Message, name='items')
+    items = Repeat(Message)
+
+
+class UpdateEntityRequest(Message):
+    update_mask = Field(FieldMask)

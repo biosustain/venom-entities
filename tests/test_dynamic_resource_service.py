@@ -1,10 +1,9 @@
-from unittest import SkipTest
-
 from flask_sqlalchemy import SQLAlchemy
-from flask_venom.test_utils import TestCase
 from flask_venom import Venom
+from flask_venom.test_utils import TestCase
 from venom import Message
 from venom.common import FieldMask, Repeat
+from venom.common.types import JSONObject, JSONValue
 from venom.exceptions import NotFound
 from venom.fields import Integer, String, Field
 from venom.message import fields, Empty
@@ -42,7 +41,7 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
     async def test_e2e_get_entity(self):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
-        self.assertEqual(PetService.get.http_path, '/pet/{id}')
+        self.assertEqual(PetService.get.http_path, '/pet/{pet_id}')
         self.assertEqual(PetService.get.response, PetMessage)
         self.assertEqual(fields(PetService.get.request), (Integer(name='id'),))
 
@@ -73,18 +72,20 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
     async def test_e2e_update_entity(self):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
-        self.assertEqual(PetService.update.http_path, '/pet/{id}')
+        self.assertEqual(PetService.update.http_path, '/pet/{pet_id}')
         self.assertEqual(PetService.update.response, PetMessage)
         self.assertEqual(fields(PetService.update.request), (
-            Integer(name='id'),
-            Field(PetMessage, name='changes'),
-            Field(FieldMask, name='update_mask')
+            Field(FieldMask, name='update_mask'),
+            Integer(name='pet_id'),
+            Field(PetMessage, name='pet')
         ))
 
         with self.app.app_context():
             PetService.__resource__.create(PetMessage(name='snek'))
             pet = await self.venom.get_instance(PetService).update(
-                PetService.update.request(1, PetMessage(name='noodle'), FieldMask(['name'])))
+                PetService.update.request(pet_id=1,
+                                          pet=PetMessage(name='noodle'),
+                                          update_mask=FieldMask(['name'])))
             self.assertIsInstance(pet, PetMessage)
             self.assertEqual(pet.id, 1)
             self.assertEqual(pet.name, 'noodle')
@@ -92,7 +93,7 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
     async def test_e2e_delete_entity(self):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
-        self.assertEqual(PetService.delete.http_path, '/pet/{id}')
+        self.assertEqual(PetService.delete.http_path, '/pet/{pet_id}')
         self.assertEqual(fields(PetService.delete.request), (Integer(name='id'),))
         self.assertEqual(PetService.delete.response, Empty)
 
@@ -104,27 +105,28 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
             with self.assertRaises(NotFound):
                 await self.venom.get_instance(PetService).get(PetService.get.request(pet.id))
 
-    @SkipTest
     async def test_e2e_list_entities(self):
         Pet, PetMessage, PetService = self._setup_pet_service_case()
 
         self.assertEqual(PetService.list.http_path, '/pet')
         self.assertEqual(fields(PetService.list.request), (
-            String(name='next_page_token'),
-            Repeat(PetMessage, name='items')
-                                                           ))
+            Field(JSONObject, name='filters', schema=PetService.__resource__.filter_schema),
+            Repeat(Field(JSONValue, schema=PetService.__resource__.order_schema), name='order'),
+            String(name='page_token'),
+            Integer(name='page_size')
+        ))
+
         self.assertEqual(fields(PetService.list.response), (
             String(name='next_page_token'),
             Repeat(PetMessage, name='items')
         ))
 
-        self.maxDiff = None
-
         with self.app.app_context():
-            pets = await self.venom.get_instance(PetService).list(PetService.list.request())
+            pets = await self.venom.get_instance(PetService).list(PetService.list.request(filters={}))
             self.assertEquals(pets, PetService.list.response('', []))  # FIXME [] should equal empty
 
-            pet = await self.venom.get_instance(PetService).create(PetMessage(name='snek'))
-            pets = await self.venom.get_instance(PetService).list(PetService.list.request())
-            self.assertEquals(pets, PetService.list.response('', [pet]))
+            pet_1 = await self.venom.get_instance(PetService).create(PetMessage(name='snek'))
+            pet_2 = await self.venom.get_instance(PetService).create(PetMessage(name='noodle'))
 
+            pets = await self.venom.get_instance(PetService).list(PetService.list.request())
+            self.assertEquals(pets, PetService.list.response('', [pet_1, pet_2]))

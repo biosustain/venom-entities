@@ -35,11 +35,11 @@ class DynamicResourceService(ResourceService):
     def create(self, request: Any) -> Any:
         return self.__resource__.create(request)
 
-    @http.GET('./{id}', auto=True)
-    @dynamic('id', attrgetter('__resource__.model_id_type'))
+    @http.GET(attrgetter('__resource__.request_path'), auto=True)
+    @dynamic('request', attrgetter('__resource__.get_request_message'))
     @dynamic('return', attrgetter('__resource__.model'))
-    def get(self, id: Any) -> Any:
-        return self.__resource__.get(id)
+    def get(self, request: Message) -> Any:
+        return self.__resource__.get(request.get(self.__resource__.request_id_field_name))
 
     @http.POST('.', auto=True)
     @dynamic('request', attrgetter('__resource__.list_request_message'))
@@ -49,16 +49,15 @@ class DynamicResourceService(ResourceService):
         return self.__resource__.list_response_message(next_page_token,
                                                        [self.__resource__.format(item) for item in items])
 
-    @http.PATCH('./{id}', auto=True)
-    @dynamic('id', attrgetter('__resource__.model_id_type'))
-    @dynamic('changes', attrgetter('__resource__.model_message'))
+    @http.PATCH(attrgetter('__resource__.request_path'), auto=True)
+    @dynamic('request', attrgetter('__resource__.update_request_message'))
     @dynamic('return', attrgetter('__resource__.model'))
-    def update(self, id: Any, changes: Message, update_mask: FieldMask) -> Any:
-        entity = self.__resource__.get(id)
-        return self.__resource__.update(entity, changes, update_mask)
+    def update(self, request: Any) -> Any:
+        entity = self.__resource__.get(request.get(self.__resource__.request_id_field_name))
+        return self.__resource__.update(entity, request.get(self.__resource__.model_name), request.update_mask)
 
-    @http.DELETE('./{id}', http_status=204, auto=True)
-    @dynamic('id', attrgetter('__resource__.model_id_type'))
-    def delete(self, id: Any) -> None:
-        entity = self.__resource__.get(id)
+    @http.DELETE(attrgetter('__resource__.request_path'), http_status=204, auto=True)
+    @dynamic('request', attrgetter('__resource__.get_request_message'))
+    def delete(self, request: Message) -> None:
+        entity = self.__resource__.get(request.get(self.__resource__.request_id_field_name))
         self.__resource__.delete(entity)

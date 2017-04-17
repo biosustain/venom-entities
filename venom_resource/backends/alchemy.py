@@ -58,7 +58,8 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
                 reference, name = field.options.relationship
                 self._relationships[field.name] = Relationship(reference, name, field.name)
 
-        self.request_id_field_name = self.model_name + '_' + self.model_id_attribute
+        self.request_id_field_name = f'{self.model_name}_{self.model_id_attribute}'
+        self.request_path = f'./{{{self.request_id_field_name}}}'
 
     def _inspect_model(self, model: Type[_Mo]) -> None:
         if not self.model_name:
