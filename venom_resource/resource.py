@@ -1,6 +1,7 @@
 from typing import Generic, Type, Dict, Any, Mapping, Union, TypeVar, NamedTuple, List, Tuple
-from venom.common import FieldMask, Message, Converter, Field, Repeat
+from venom.common import FieldMask, Message, Converter, Field
 from venom.common.types import JSONObject, JSONValue
+from venom.fields import RepeatField
 from venom.message import from_object, message_factory
 from venom.rpc import Service
 from venom.rpc.method import MethodDecorator, HTTPMethodDecorator
@@ -91,13 +92,13 @@ class Resource(Generic[_Mo, _Mo_id, _M]):
     def list_request_message(self) -> Type[ListEntitiesRequest]:
         return message_factory(f'List{upper_camelcase(self.name)}Request', {
             'filters': Field(JSONObject, schema=self.filter_schema),
-            'order': Repeat(Field(JSONValue, schema=self.order_schema))
+            'order': RepeatField(JSONValue, schema=self.order_schema)
         }, super_message=ListEntitiesRequest)
 
     @cached_property
     def list_response_message(self) -> Type[ListEntitiesResponse]:
         return message_factory(f'List{upper_camelcase(self.name)}Response', {
-            'items': Repeat(self.model_message)
+            'items': RepeatField(self.model_message)
         }, super_message=ListEntitiesResponse)
 
     @cached_property
@@ -168,7 +169,7 @@ class ResourceEntityConverter(ResourceConverterBase, Converter):
     def python(self):
         return self.resource.model
 
-    def convert(self, message: Message) -> Any:
+    def resolve(self, message: Message) -> Any:
         # TODO fallback where the Python is the same as wire.
         raise NotImplementedError()
 
@@ -200,7 +201,7 @@ class ResourceEntityIDConverter(ResourceConverterBase, Converter):
     def python(self):
         return self.resource.model
 
-    def convert(self, id_: Any) -> Any:
+    def resolve(self, id_: Any) -> Any:
         return self.resource.get(id_)
 
     def format(self, entity: Any) -> Any:

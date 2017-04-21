@@ -3,14 +3,14 @@ from typing import Generic, List, TypeVar
 from venom import Message
 from venom.common import FieldMask
 from venom.common.types import JSONObject, JSONValue
-from venom.fields import String, Integer, Field, Repeat
+from venom.fields import String, Integer, Field, RepeatField
 
 E = TypeVar('E')
 
 
 class ListEntitiesRequest(Message):
     filters = Field(JSONObject)
-    order = Repeat(JSONValue)
+    order = RepeatField(JSONValue)
 
     page_token = String()
     page_size = Integer()
@@ -18,7 +18,7 @@ class ListEntitiesRequest(Message):
 
 class ListEntitiesResponse(Message):
     next_page_token = String()
-    items = Repeat(Message)
+    items = RepeatField(Message)
 
 
 class UpdateEntityRequest(Message):

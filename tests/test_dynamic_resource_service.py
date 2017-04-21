@@ -2,10 +2,10 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_venom import Venom
 from flask_venom.test_utils import TestCase
 from venom import Message
-from venom.common import FieldMask, Repeat
+from venom.common import FieldMask
 from venom.common.types import JSONObject, JSONValue
 from venom.exceptions import NotFound
-from venom.fields import Integer, String, Field
+from venom.fields import Integer, String, Field, RepeatField
 from venom.message import fields, Empty
 from venom.rpc.test_utils import AioTestCaseMeta
 
@@ -118,14 +118,14 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
 
         self.assertEqual(fields(PetService.list.request), (
             Field(JSONObject, name='filters', schema=PetService.__resource__.filter_schema),
-            Repeat(Field(JSONValue, schema=PetService.__resource__.order_schema), name='order'),
+            RepeatField(JSONValue, schema=PetService.__resource__.order_schema, name='order'),
             String(name='page_token'),
             Integer(name='page_size')
         ))
 
         self.assertEqual(fields(PetService.list.response), (
             String(name='next_page_token'),
-            Repeat(PetMessage, name='items')
+            RepeatField(PetMessage, name='items')
         ))
 
         with self.app.app_context():
