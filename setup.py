@@ -4,10 +4,10 @@ from setuptools import setup
 setup(
     name='Venom-Entities',
     version='0.0.0',
+    packages=find_packages(exclude=['*tests*']),
     license='MIT',
     author='Lars Schöning',
     author_email='lays@biosustain.dtu.dk',
-    py_modules=['flask_venom'],
     zip_safe=False,
     include_package_data=True,
     platforms='any',
