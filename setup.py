@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 
 setup(
-    name='Venom-Entities',
+    name='venom-resource',
     version='0.0.0',
     packages=find_packages(exclude=['*tests*']),
     license='MIT',
