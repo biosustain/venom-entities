@@ -1,14 +1,14 @@
+from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
+
 from flask import current_app
 from flask_sqlalchemy import get_state
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm.exc import NoResultFound
-from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
 from venom.common import FieldMask
 from venom.exceptions import NotFound, Conflict
 from venom.message import fields, items
 from venom.rpc import Service
-
 from venom_resource import Relationship
 from venom_resource.resource import Resource, _Mo, _Mo_id, _M
 
@@ -117,23 +117,34 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
 
     def paginate(self,
                  page_token: str = '',
-                 page_size: int = 0,
-                 *filters: Any) -> Tuple[List[_M], str]:
+                 page_size: int = 50,
+                 page: int = 1,
+                 filters: List[Any] = None,
+                 order_clauses: List[Any] = None) -> Tuple[List[_M], str]:
 
-        if self.default_sort_reverse:
-            order_clause = self.default_sort_column.desc()
+        page_size = page_size or 50
+
+        if page > 1:
+            offset = (page - 1) * page_size
         else:
-            order_clause = self.default_sort_column.asc()
+            offset = 0
 
-        query = self.model.query.order_by(order_clause)
+        if not order_clauses:
+            if self.default_sort_reverse:
+                order_clauses = [self.default_sort_column.desc()]
+            else:
+                order_clauses = [self.default_sort_column.asc()]
+
+        query = self.model.query.order_by(*order_clauses)
 
         if filters:
             query = query.filter(*filters)
 
-        if page_size:
-            query = query.limit(page_size or 50)
+        total = query.count()
 
-        return query.all(), ''
+        query = query.limit(page_size).offset(offset)
+
+        return query.all(), total, ''
 
     def create(self, properties: _M) -> _Mo:
         entity = self.model()
