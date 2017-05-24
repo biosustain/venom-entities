@@ -125,15 +125,16 @@ class DynamicResourceServiceTestCase(TestCase, metaclass=AioTestCaseMeta):
 
         self.assertEqual(fields(PetService.list.response), (
             String(name='next_page_token'),
+            Integer(name='total'),
             RepeatField(PetMessage, name='items')
         ))
 
         with self.app.app_context():
             pets = await self.venom.get_instance(PetService).list(PetService.list.request(filters={}))
-            self.assertEquals(pets, PetService.list.response('', []))  # FIXME [] should equal empty
+            self.assertEquals(pets, PetService.list.response('', 0, []))  # FIXME [] should equal empty
 
             pet_1 = await self.venom.get_instance(PetService).create(PetMessage(name='snek'))
             pet_2 = await self.venom.get_instance(PetService).create(PetMessage(name='noodle'))
 
             pets = await self.venom.get_instance(PetService).list(PetService.list.request())
-            self.assertEquals(pets, PetService.list.response('', [pet_1, pet_2]))
+            self.assertEquals(pets, PetService.list.response('', 2, [pet_1, pet_2]))

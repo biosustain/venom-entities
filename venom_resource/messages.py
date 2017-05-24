@@ -18,6 +18,7 @@ class ListEntitiesRequest(Message):
 
 class ListEntitiesResponse(Message):
     next_page_token = String()
+    total = Integer()
     items = RepeatField(Message)
 
 

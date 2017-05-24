@@ -46,8 +46,9 @@ class DynamicResourceService(ResourceService):
     @dynamic('request', attrgetter('__resource__.list_request_message'))
     @dynamic('return', attrgetter('__resource__.list_response_message'))
     def list(self, request: Any) -> Any:
-        items, next_page_token = self.__resource__.paginate(request)
+        items, total, next_page_token = self.__resource__.paginate()
         return self.__resource__.list_response_message(next_page_token,
+                                                       total,
                                                        [self.__resource__.format(item) for item in items])
 
     @http.PATCH(attrgetter('__resource__.request_path'),
