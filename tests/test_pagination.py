@@ -2,10 +2,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_venom import Venom
 from flask_venom.test_utils import TestCase
 from sqlalchemy import func
-from venom import Message
-from venom.common.fields import DateTime
 from venom.exceptions import NotFound
-from venom.fields import Integer, String
 from venom.rpc.test_utils import AioTestCaseMeta
 
 from venom_resource.backends.alchemy.pagination import CursorPagination
@@ -34,22 +31,28 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
         paginator = CursorPagination(Pet, 10, [{'field': 'created_at', 'ascending': False}])
 
         with self.assertRaises(NotFound):
-            paginator.paginate_queryset('123')
+            paginator.paginate_query(Pet.query, '123')
 
     async def test_ordering(self):
         Pet = self._setup_pet_service_case()
 
         with self.assertRaises(AssertionError):
+            # Test for invalid data type for ordering
             CursorPagination(Pet, 4, None)
 
         with self.assertRaises(AssertionError):
+            # Test for invalid data type for ordering
             CursorPagination(Pet, 4, 'created_at')
+
+        with self.assertRaises(AssertionError):
+            # Test for invalid field name for ordering
+            CursorPagination(Pet, 4, [{'field': 'invalid_field'}])
 
         with self.assertRaises(AssertionError):
             CursorPagination(Pet, 10, [{'field': 'created_at'}])
 
         paginator = CursorPagination(Pet, 10, [{'field': 'created_at', 'ascending': False}])
-        paginator.paginate_queryset()
+        paginator.paginate_query(Pet.query)
         self.assertListEqual(paginator.ordering, [{'field': 'created_at', 'ascending': False}])
 
     async def test_cursor_pagination(self):
@@ -60,28 +63,29 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
         pets = [Pet(name=name) for name in pet_names]
         self.sa.session.add_all(pets)
 
-
         def get_pages(pagination, page_token=None):
             """
             Given a page token return a tuple of:
 
             (previous page, current page, next page, previous token, next tpken)
             """
-            queryset = pagination.paginate_queryset(page_token)
-            current = [item.name for item in queryset]
+            query = Pet.query
+
+            page = pagination.paginate_query(query, page_token)
+            current = [item.name for item in page]
 
             next_token = pagination.get_next_token()
             previous_token = pagination.get_previous_token()
 
             if next_token is not None:
-                queryset = pagination.paginate_queryset(next_token)
-                next = [item.name for item in queryset]
+                page = pagination.paginate_query(query, next_token)
+                next = [item.name for item in page]
             else:
                 next = None
 
             if previous_token is not None:
-                queryset = pagination.paginate_queryset(previous_token)
-                previous = [item.name for item in queryset]
+                page = pagination.paginate_query(query, previous_token)
+                previous = [item.name for item in page]
             else:
                 previous = None
 

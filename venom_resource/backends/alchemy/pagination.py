@@ -1,6 +1,6 @@
 from base64 import b64decode, b64encode
 from collections import namedtuple
-from typing import List, Dict
+from typing import Any, Dict, List, Union
 from urllib.parse import parse_qs, urlencode
 
 from flask_sqlalchemy import Model
@@ -51,6 +51,7 @@ def convert_ordering_to_alchmey_clauses(model, ordering):
 
 
 Cursor = namedtuple('Cursor', ['offset', 'reverse', 'position'])
+_Ordering_T = Union[List[Dict[str, Any]], Dict[str, Any]]
 
 
 class CursorPagination(object):
@@ -69,7 +70,7 @@ class CursorPagination(object):
     # queries, by having a hard cap on the maximum possible size of the offset.
     offset_cutoff = 1000
 
-    def __init__(self, model: Model, page_size: int, ordering: List[Dict[str, any]]):
+    def __init__(self, model: Model, page_size: int, ordering: _Ordering_T):
         assert isinstance(ordering, (dict, list, tuple)), (
             'Invalid ordering. Expected dict or tuple, but got {type}'.format(
                 type=type(ordering).__name__
@@ -84,6 +85,9 @@ class CursorPagination(object):
         self.ordering = []
 
         for order in ordering:
+            if not hasattr(self.model, order['field']):
+                continue
+
             if order.get('ascending') is None:
                 continue
 
@@ -96,7 +100,7 @@ class CursorPagination(object):
             )
         )
 
-    def paginate_queryset(self, page_token: str = None):
+    def paginate_query(self, query, page_token: str = None):
         self.cursor = self.decode_cursor(page_token)
 
         if self.cursor is None:
@@ -111,7 +115,7 @@ class CursorPagination(object):
         else:
             ordering_clauses = convert_ordering_to_alchmey_clauses(self.model, self.ordering)
 
-        query = self.model.query.order_by(*ordering_clauses)
+        query = query.order_by(*ordering_clauses)
 
         # If we have a cursor with a fixed position then filter by that.
         if current_position is not None:

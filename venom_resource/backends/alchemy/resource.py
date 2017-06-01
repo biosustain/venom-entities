@@ -1,4 +1,4 @@
-from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
+from typing import Type, Set, Iterable, Any, Mapping, List, Dict
 
 from flask import current_app
 from flask_sqlalchemy import get_state
@@ -9,8 +9,10 @@ from venom.common import FieldMask
 from venom.exceptions import NotFound, Conflict
 from venom.message import fields, items
 from venom.rpc import Service
+
 from venom_resource import Relationship
 from venom_resource.resource import Resource, _Mo, _Mo_id, _M
+from .pagination import _Ordering_T, CursorPagination
 
 
 class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
@@ -116,35 +118,38 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
                 return getattr(entity, self.model_id_attribute)
 
     def paginate(self,
-                 page_token: str = '',
                  page_size: int = 50,
-                 page: int = 1,
-                 filters: List[Any] = None,
-                 order_clauses: List[Any] = None) -> Tuple[List[_M], str]:
+                 page_token: str = '',
+                 ordering: _Ordering_T = None,
+                 filters: List[Any] = None) -> Dict[str, Any]:
 
-        page_size = page_size or 50
-
-        if page > 1:
-            offset = (page - 1) * page_size
-        else:
-            offset = 0
-
-        if not order_clauses:
+        if not ordering:
             if self.default_sort_reverse:
-                order_clauses = [self.default_sort_column.desc()]
+                ordering = {
+                    'field': self.default_sort_column.name,
+                    'ascending': False
+                }
             else:
-                order_clauses = [self.default_sort_column.asc()]
+                ordering = {
+                    'field': self.default_sort_column.name,
+                    'ascending': True
+                }
 
-        query = self.model.query.order_by(*order_clauses)
+        query = self.model.query
 
         if filters:
             query = query.filter(*filters)
 
-        total = query.count()
+        pagination = CursorPagination(self.model, page_size, ordering)
+        items = pagination.paginate_query(query, page_token)
+        next_token = pagination.get_next_token()
+        previous_token = pagination.get_previous_token()
 
-        query = query.limit(page_size).offset(offset)
-
-        return query.all(), total, ''
+        return {
+            'items': items,
+            'next_page_token': next_token,
+            'previous_page_token': previous_token
+        }
 
     def create(self, properties: _M) -> _Mo:
         entity = self.model()
