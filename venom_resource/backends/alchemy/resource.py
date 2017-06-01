@@ -82,7 +82,7 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
     def __set_name__(self, owner, name):
         super().__set_name__(owner, name)
 
-        from ..service import ResourceService
+        from venom_resource.service import ResourceService
         if issubclass(owner, Service):
             self.default_page_size = owner.__meta__.get('default_page_size') or self.default_page_size
             self.maximum_page_size = owner.__meta__.get('maximum_page_size') or self.maximum_page_size

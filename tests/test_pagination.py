@@ -8,7 +8,7 @@ from venom.exceptions import NotFound
 from venom.fields import Integer, String
 from venom.rpc.test_utils import AioTestCaseMeta
 
-from venom_resource.pagination import CursorPagination
+from venom_resource.backends.alchemy.pagination import CursorPagination
 
 
 class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
