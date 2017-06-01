@@ -1,7 +1,9 @@
 from base64 import b64decode, b64encode
 from collections import namedtuple
+from typing import List, Dict
 from urllib.parse import parse_qs, urlencode
 
+from flask_sqlalchemy import Model
 from sqlalchemy import asc, desc
 from venom.exceptions import NotFound
 
@@ -20,11 +22,16 @@ def _positive_int(integer_string, strict=False, cutoff=None):
 
 def _reverse_ordering(ordering_tuple):
     """
-    Given an order_by tuple such as `('-created', 'uuid')` reverse the
-    ordering and return a new tuple, eg. `('created', '-uuid')`.
+    Given an order_by tuple such as `({'field': 'created', 'ascending': False}, {'field': 'uuid', 'ascending': True})`
+    reverse the ordering and return a new tuple, eg.
+    `({'field': 'created', 'ascending': True}, {'field': 'uuid', 'ascending': False})`.
+    
     """
     def invert(x):
-        return x[1:] if x.startswith('-') else '-' + x
+        return {
+            'field': x['field'],
+            'ascending': not x['ascending']
+        }
 
     return tuple([invert(item) for item in ordering_tuple])
 
@@ -33,18 +40,14 @@ def convert_ordering_to_alchmey_clauses(model, ordering):
     clauses = []
 
     for order in ordering:
-        is_reversed = order.startswith('-')
-        order_attr = order.lstrip('-')
-        order_field = getattr(model, order_attr)
+        order_field = getattr(model, order['field'])
 
-        if is_reversed:
-            clauses.append(desc(order_field))
-        else:
+        if order['ascending']:
             clauses.append(asc(order_field))
+        else:
+            clauses.append(desc(order_field))
 
     return clauses
-
-
 
 
 Cursor = namedtuple('Cursor', ['offset', 'reverse', 'position'])
@@ -66,15 +69,34 @@ class CursorPagination(object):
     # queries, by having a hard cap on the maximum possible size of the offset.
     offset_cutoff = 1000
 
-    def __init__(self, model, page_size: int, ordering):
+    def __init__(self, model: Model, page_size: int, ordering: List[Dict[str, any]]):
+        assert isinstance(ordering, (dict, list, tuple)), (
+            'Invalid ordering. Expected dict or tuple, but got {type}'.format(
+                type=type(ordering).__name__
+            )
+        )
+        if isinstance(ordering, dict):
+            ordering = [ordering, ]
+
         self.model = model
         self.page_size = page_size
-        self.ordering = ordering
+
+        self.ordering = []
+
+        for order in ordering:
+            if order.get('ascending') is None:
+                continue
+
+            self.ordering.append(order)
+
+        assert len(self.ordering) > 0, (
+            'Invalid ordering. Expected at lease one value with '
+            'correct ascending value but got {ordering}'.format(
+                ordering=ordering
+            )
+        )
 
     def paginate_queryset(self, page_token: str = None):
-
-        self.ordering = self.get_ordering()
-
         self.cursor = self.decode_cursor(page_token)
 
         if self.cursor is None:
@@ -94,8 +116,8 @@ class CursorPagination(object):
         # If we have a cursor with a fixed position then filter by that.
         if current_position is not None:
             order = self.ordering[0]
-            is_reversed = order.startswith('-')
-            order_attr = order.lstrip('-')
+            is_reversed = order['ascending'] is False
+            order_attr = order['field']
 
             try:
                 column = getattr(self.model, order_attr)
@@ -245,25 +267,6 @@ class CursorPagination(object):
         cursor = Cursor(offset=offset, reverse=True, position=position)
         return self.encode_cursor(cursor)
 
-    def get_ordering(self):
-        # The default case is to check for an `ordering` attribute
-        # on this pagination instance.
-        ordering = self.ordering
-        assert ordering is not None, (
-            'Using cursor pagination, but no ordering attribute was declared '
-            'on the pagination class.'
-        )
-
-        assert isinstance(ordering, (str, list, tuple)), (
-            'Invalid ordering. Expected string or tuple, but got {type}'.format(
-                type=type(ordering).__name__
-            )
-        )
-
-        if isinstance(ordering, str):
-            return tuple([ordering])
-        return tuple(ordering)
-
     def decode_cursor(self, encoded: str) -> Cursor:
         """
         Given a request with a cursor, return a `Cursor` instance.
@@ -305,9 +308,9 @@ class CursorPagination(object):
         return encoded
 
     def _get_position_from_instance(self, instance, ordering):
-        field_name = ordering[0].lstrip('-')
+        field = ordering[0]['field']
         if isinstance(instance, dict):
-            attr = instance[field_name]
+            attr = instance[field]
         else:
-            attr = getattr(instance, field_name)
+            attr = getattr(instance, field)
         return str(attr)

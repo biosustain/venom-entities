@@ -31,7 +31,7 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
 
     async def test_invalid_cursor(self):
         Pet = self._setup_pet_service_case()
-        paginator = CursorPagination(Pet, 10, '-created_at')
+        paginator = CursorPagination(Pet, 10, [{'field': 'created_at', 'ascending': False}])
 
         with self.assertRaises(NotFound):
             paginator.paginate_queryset('123')
@@ -39,17 +39,18 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
     async def test_ordering(self):
         Pet = self._setup_pet_service_case()
 
-        pagination = CursorPagination(Pet, 4, None)
         with self.assertRaises(AssertionError):
-            pagination.paginate_queryset(page_token=None)
+            CursorPagination(Pet, 4, None)
 
-        paginator = CursorPagination(Pet, 10, '-created_at')
+        with self.assertRaises(AssertionError):
+            CursorPagination(Pet, 4, 'created_at')
+
+        with self.assertRaises(AssertionError):
+            CursorPagination(Pet, 10, [{'field': 'created_at'}])
+
+        paginator = CursorPagination(Pet, 10, [{'field': 'created_at', 'ascending': False}])
         paginator.paginate_queryset()
-        self.assertEqual(paginator.ordering, tuple(['-created_at']))
-
-        paginator = CursorPagination(Pet, 10, ['name', '-created_at'])
-        paginator.paginate_queryset('')
-        self.assertEqual(paginator.ordering, tuple(['name', '-created_at']))
+        self.assertListEqual(paginator.ordering, [{'field': 'created_at', 'ascending': False}])
 
     async def test_cursor_pagination(self):
         Pet = self._setup_pet_service_case()
@@ -86,7 +87,7 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
 
             return (previous, current, next, previous_token, next_token)
 
-        pagination = CursorPagination(Pet, 2, 'name')
+        pagination = CursorPagination(Pet, 2, [{'field': 'name', 'ascending': True}])
 
         (previous, current, next, previous_token, next_token) = get_pages(pagination, page_token=None)
         self.assertEqual(previous, None)
@@ -104,7 +105,7 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.assertListEqual(current, ['E', 'F'])
         self.assertListEqual(next, ['G', 'H'])
 
-        pagination = CursorPagination(Pet, 2, '-name')
+        pagination = CursorPagination(Pet, 2, [{'field': 'name', 'ascending': False}])
 
         (previous, current, next, previous_token, next_token) = get_pages(pagination, page_token=None)
         self.assertEqual(previous, None)
@@ -117,12 +118,12 @@ class CursorPaginationTestCase(TestCase, metaclass=AioTestCaseMeta):
         self.assertListEqual(current, ['X', 'W'])
         self.assertListEqual(next, ['V', 'U'])
 
-        pagination = CursorPagination(Pet, 4, 'created_at')
+        pagination = CursorPagination(Pet, 4, [{'field': 'created_at', 'ascending': True}])
         (previous, current, next, previous_token, next_token) = get_pages(pagination, page_token=None)
         self.assertListEqual(current, ['D', 'G', 'L', 'I'])
         self.assertListEqual(next, ['O', 'X', 'Y', 'T'])
 
-        pagination = CursorPagination(Pet, 20, 'name')
+        pagination = CursorPagination(Pet, 20, [{'field': 'name', 'ascending': True}])
         (previous, current, next, previous_token, next_token) = get_pages(pagination, page_token=None)
         self.assertEqual(len(current), 20)
         self.assertListEqual(next, ['U', 'V', 'W', 'X', 'Y', 'Z'])
