@@ -1,4 +1,4 @@
-from typing import Generic, List, TypeVar
+from typing import TypeVar
 
 from venom import Message
 from venom.common import FieldMask

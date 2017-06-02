@@ -1,4 +1,4 @@
-from typing import NamedTuple, Union, Tuple
+from typing import Tuple
 
 from flask_sqlalchemy import SQLAlchemy
 from flask_venom import Venom
@@ -187,8 +187,10 @@ class ResourceServiceManagerTestCase(TestCase):
         resource = SQLAlchemyResource(Pet, PetEntity)
 
         with self.app.app_context():
-            items, next_page_token = resource.paginate()
-            self.assertEqual([pet.name for pet in items], ['snek', 'noodle'])
+            result = resource.paginate()
+            self.assertEqual([pet.name for pet in result['items']], ['snek', 'noodle'])
+            self.assertEqual(result['previous_page_token'], None)
+            self.assertEqual(result['next_page_token'], None)
 
     def _create_person_pet_scenario(self) -> Tuple[type, type]:
         class Person(self.sa.Model):

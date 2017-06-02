@@ -1,9 +1,10 @@
+from typing import Type, Set, Iterable, Any, Mapping, List, Dict
+
 from flask import current_app
 from flask_sqlalchemy import get_state
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import class_mapper
 from sqlalchemy.orm.exc import NoResultFound
-from typing import Type, Set, Iterable, Any, Mapping, Tuple, List
 from venom.common import FieldMask
 from venom.exceptions import NotFound, Conflict
 from venom.message import fields, items
@@ -11,6 +12,7 @@ from venom.rpc import Service
 
 from venom_resource import Relationship
 from venom_resource.resource import Resource, _Mo, _Mo_id, _M
+from .pagination import _Ordering_T, CursorPagination
 
 
 class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
@@ -82,7 +84,7 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
     def __set_name__(self, owner, name):
         super().__set_name__(owner, name)
 
-        from ..service import ResourceService
+        from venom_resource.service import ResourceService
         if issubclass(owner, Service):
             self.default_page_size = owner.__meta__.get('default_page_size') or self.default_page_size
             self.maximum_page_size = owner.__meta__.get('maximum_page_size') or self.maximum_page_size
@@ -116,24 +118,38 @@ class SQLAlchemyResource(Resource[_Mo, _Mo_id, _M]):
                 return getattr(entity, self.model_id_attribute)
 
     def paginate(self,
+                 page_size: int = 50,
                  page_token: str = '',
-                 page_size: int = 0,
-                 *filters: Any) -> Tuple[List[_M], str]:
+                 ordering: _Ordering_T = None,
+                 filters: List[Any] = None) -> Dict[str, Any]:
 
-        if self.default_sort_reverse:
-            order_clause = self.default_sort_column.desc()
-        else:
-            order_clause = self.default_sort_column.asc()
+        if not ordering:
+            if self.default_sort_reverse:
+                ordering = {
+                    'field': self.default_sort_column.name,
+                    'ascending': False
+                }
+            else:
+                ordering = {
+                    'field': self.default_sort_column.name,
+                    'ascending': True
+                }
 
-        query = self.model.query.order_by(order_clause)
+        query = self.model.query
 
         if filters:
             query = query.filter(*filters)
 
-        if page_size:
-            query = query.limit(page_size or 50)
+        pagination = CursorPagination(self.model, page_size, ordering)
+        items = pagination.paginate_query(query, page_token)
+        next_token = pagination.get_next_token()
+        previous_token = pagination.get_previous_token()
 
-        return query.all(), ''
+        return {
+            'items': items,
+            'next_page_token': next_token,
+            'previous_page_token': previous_token
+        }
 
     def create(self, properties: _M) -> _Mo:
         entity = self.model()

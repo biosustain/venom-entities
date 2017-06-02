@@ -1,6 +1,6 @@
 from operator import attrgetter
-
 from typing import ClassVar, Any
+
 from venom import Message, Empty
 from venom.rpc import Service, http
 from venom.rpc.inspection import dynamic
@@ -46,9 +46,9 @@ class DynamicResourceService(ResourceService):
     @dynamic('request', attrgetter('__resource__.list_request_message'))
     @dynamic('return', attrgetter('__resource__.list_response_message'))
     def list(self, request: Any) -> Any:
-        items, next_page_token = self.__resource__.paginate(request)
-        return self.__resource__.list_response_message(next_page_token,
-                                                       [self.__resource__.format(item) for item in items])
+        result = self.__resource__.paginate()
+        return self.__resource__.list_response_message(result['next_page_token'],
+                                                       [self.__resource__.format(item) for item in result['items']])
 
     @http.PATCH(attrgetter('__resource__.request_path'),
                 name=lambda owner: f'update_{owner.__resource__.model_name}',
